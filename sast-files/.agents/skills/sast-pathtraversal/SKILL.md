@@ -1,18 +1,18 @@
 ---
 name: sast-pathtraversal
 description: >-
-  Detect path traversal vulnerabilities in a codebase using a two-phase
-  approach: first find all file-loading sites where a path is constructed
-  dynamically (open, readFile, send_file, etc.), then trace whether
-  user-supplied input reaches those sites and can escape the intended base
-  directory. Requires sast/architecture.md (run sast-analysis first). Outputs
-  findings to sast/pathtraversal-results.md. Use when asked to find path
-  traversal, directory traversal, or file disclosure bugs.
+  Detect path traversal vulnerabilities in a codebase using a three-phase
+  approach: recon (find file-loading sinks with dynamic paths), batched verify
+  (trace user input and mitigations in parallel subagents, 3 sinks each), and
+  merge (consolidate batch results). Requires sast/architecture.md (run
+  sast-analysis first). Outputs findings to sast/pathtraversal-results.md. Use
+  when asked to find path traversal, directory traversal, or file disclosure
+  bugs.
 ---
 
 # Path Traversal Detection
 
-You are performing a focused security assessment to find path traversal vulnerabilities in a codebase. This skill uses a two-phase approach with subagents: **sink discovery** (find all places where files are loaded using dynamically constructed paths) then **taint** (confirm whether user-supplied input reaches those sinks and can escape the intended directory).
+You are performing a focused security assessment to find path traversal vulnerabilities in a codebase. This skill uses a three-phase approach with subagents: **recon** (find file-loading sinks with dynamic paths), **batched verify** (trace user input and check mitigations in parallel batches of 3), and **merge** (consolidate batch results into one report).
 
 **Prerequisites**: `sast/architecture.md` must exist. Run the analysis skill first if it doesn't.
 
@@ -284,7 +284,7 @@ with zipfile.ZipFile(user_zip) as zf:
 
 ## Execution
 
-This skill runs in two phases using subagents. Pass the contents of `sast/architecture.md` to both subagents as context.
+This skill runs in three phases using subagents. Pass the contents of `sast/architecture.md` to all subagents as context.
 
 ### Phase 1: Find File-Loading Sinks With Dynamic Paths
 
@@ -360,7 +360,7 @@ Launch a subagent with the following instructions:
 
 ### After Phase 1: Check for Candidates Before Proceeding
 
-After Phase 1 completes, read `sast/pathtraversal-recon.md`. If the recon found **zero file-loading sinks** (the summary reports "Found 0" or the "File-Loading Sinks" section is empty or absent), **skip Phase 2 entirely**. Instead, write the following content to `sast/pathtraversal-results.md` and stop:
+After Phase 1 completes, read `sast/pathtraversal-recon.md`. If the recon found **zero file-loading sinks** (the summary reports "Found 0" or the "File-Loading Sinks" section is empty or absent), **skip Phase 2 and Phase 3 entirely**. Instead, write the following content to `sast/pathtraversal-results.md`, then delete `sast/pathtraversal-recon.md`, and stop:
 
 ```markdown
 # Path Traversal Analysis Results
@@ -370,13 +370,32 @@ No vulnerabilities found.
 
 Only proceed to Phase 2 if Phase 1 found at least one file-loading sink.
 
-### Phase 2: Trace User Input to File-Loading Sinks and Check for Escape
+### Phase 2: Verify — Trace Taint and Check Mitigations (Batched)
 
-Launch a second subagent **after Phase 1 completes** with the following instructions:
+After Phase 1 completes, read `sast/pathtraversal-recon.md` and split the file-loading sinks into **batches of up to 3 sinks each**. Launch **one subagent per batch in parallel**. Each subagent analyzes only its assigned sinks and writes results to its own batch file.
 
-> **Goal**: For each file-loading sink in `sast/pathtraversal-recon.md`, determine whether a user-supplied value reaches the dynamic path variable AND whether any mitigation prevents the path from escaping the intended base directory. Write final results to `sast/pathtraversal-results.md`.
+**Batching procedure** (you, the orchestrator, do this — not a subagent):
+
+1. Read `sast/pathtraversal-recon.md` and count the numbered sink sections (### 1., ### 2., etc.).
+2. Divide them into batches of up to 3. For example, 8 sinks → 3 batches (1-3, 4-6, 7-8).
+3. For each batch, extract the full text of those sink sections from the recon file.
+4. Launch all batch subagents **in parallel**, passing each one only its assigned sinks.
+5. Each subagent writes to `sast/pathtraversal-batch-N.md` where N is the 1-based batch number.
+6. Identify the project's primary language/framework from `sast/architecture.md` and select **only the matching examples** from the "Vulnerable vs. Secure Examples" section above (and "Patterns That Prevent Path Traversal" / "What Path Traversal is NOT" as reference). For example, if the project uses Node.js/Express, include the "Node.js — Express" block. Include these selected examples in each subagent's instructions where indicated by `[TECH-STACK EXAMPLES]` below.
+
+Give each batch subagent the following instructions (substitute the batch-specific values):
+
+> **Goal**: For each assigned file-loading sink, determine whether a user-supplied value reaches the dynamic path variable AND whether any mitigation prevents the path from escaping the intended base directory. Our goal is to find path traversal vulnerabilities. Write results to `sast/pathtraversal-batch-[N].md`.
 >
-> **Context**: You will be given the project's architecture summary and the Phase 1 recon output. Use the architecture to understand request entry points, middleware, and how data flows through the application.
+> **Your assigned sinks** (from the recon phase):
+>
+> [Paste the full text of the assigned sink sections here, preserving the original numbering]
+>
+> **Context**: You will be given the project's architecture summary. Use it to understand request entry points, middleware, and how data flows through the application.
+>
+> **Path traversal reference** — what to look for:
+>
+> User-supplied input incorporated into a filesystem path without constraining the resolved path to an intended base directory (including ZipSlip-style archive extraction). Do **not** flag SSRF, pure RCE/file-write classes, fully hardcoded paths, or safe `realpath`/`resolve` + base prefix checks as path traversal (see the skill's "What Path Traversal is NOT" and "Patterns That Prevent Path Traversal" sections in the main skill document if needed).
 >
 > **For each sink, perform two checks**:
 >
@@ -420,23 +439,20 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - URL-decoding the input once — attackers can double-encode: `%252e%252e%252f` → `%2e%2e%2f` → `../`
 > - Type validation (e.g., checking the extension is `.pdf`) without a path escape check — an attacker can use `../../etc/passwd%00.pdf` (null-byte) on older systems or frame the path to have the right extension at the end
 >
+> **Vulnerable vs. secure examples for this project's tech stack**:
+>
+> [TECH-STACK EXAMPLES]
+>
 > **Classification**:
 > - **Vulnerable**: User input demonstrably reaches the path variable AND no effective mitigation is in place before the file operation.
 > - **Likely Vulnerable**: User input probably reaches the path variable (indirect flow), or a weak/incomplete mitigation is present (e.g., `replace('../', '')`, no trailing-separator in prefix check).
 > - **Not Vulnerable**: The path variable is server-side only, OR an effective mitigation (`realpath` + prefix check, `basename`, strict allowlist, safe framework helper) is correctly applied.
 > - **Needs Manual Review**: Cannot determine the variable's origin with confidence (passes through opaque helpers or complex conditional flows), or the mitigation logic is non-standard and hard to evaluate statically.
 >
-> **Output format** — write to `sast/pathtraversal-results.md`:
+> **Output format** — write to `sast/pathtraversal-batch-[N].md`:
 >
 > ```markdown
-> # Path Traversal Analysis Results: [Project Name]
->
-> ## Executive Summary
-> - Sinks analyzed: [N]
-> - Vulnerable: [N]
-> - Likely Vulnerable: [N]
-> - Not Vulnerable: [N]
-> - Needs Manual Review: [N]
+> # Path Traversal Batch [N] Results
 >
 > ## Findings
 >
@@ -444,25 +460,19 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **File**: `path/to/file.ext` (lines X-Y)
 > - **Endpoint / function**: [route or function name]
 > - **Issue**: [e.g., "HTTP query param `file` flows directly into os.path.join without realpath check"]
-> - **Taint trace**: [Step-by-step from entry point to the file operation — e.g., "request.args.get('file') → filename → os.path.join(BASE, filename) → open(...)"]
-> - **Missing mitigation**: [What check is absent — e.g., "No realpath() call; no prefix verification after join"]
+> - **Taint trace**: [Step-by-step from entry point to the file operation]
+> - **Missing mitigation**: [What check is absent]
 > - **Impact**: Read arbitrary files accessible to the process user, including `/etc/passwd`, application config, source code, private keys.
-> - **Remediation**: [Specific fix — e.g., "Apply os.path.realpath() after joining, then verify the result starts with BASE + os.sep before opening"]
+> - **Remediation**: [Specific fix]
 > - **Dynamic Test**:
 >   ```
->   [curl command or payload to confirm this finding.
->    Show the exact parameter and traversal payload to test.
->    Example:
->    curl "https://app.example.com/download?file=../../../../etc/passwd"
->    curl "https://app.example.com/download?file=..%2F..%2F..%2Fetc%2Fpasswd"
->    curl "https://app.example.com/download?file=....//....//etc/passwd"
->    Look for /etc/passwd content in the response.]
+>   [curl command or payload to confirm; show traversal and encoded variants as appropriate]
 >   ```
 >
 > ### [LIKELY VULNERABLE] Descriptive name
 > - **File**: `path/to/file.ext` (lines X-Y)
 > - **Endpoint / function**: [route or function name]
-> - **Issue**: [e.g., "Variable likely sourced from user input via helper function" or "Weak mitigation: strips ../ but bypassable with ....//"]
+> - **Issue**: [e.g., "Variable likely sourced from user input via helper" or "Weak mitigation: strips ../ but bypassable with ....//"]
 > - **Taint trace**: [Best-effort trace with the uncertain step identified]
 > - **Concern**: [Why it remains a risk despite partial mitigation]
 > - **Remediation**: [Apply realpath + prefix check or basename before joining]
@@ -480,15 +490,49 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **File**: `path/to/file.ext` (lines X-Y)
 > - **Endpoint / function**: [route or function name]
 > - **Uncertainty**: [Why the variable's origin or mitigation could not be determined]
-> - **Suggestion**: [What to trace manually — e.g., "Follow `resolve_asset_path()` in helpers.py to check where its return value originates"]
+> - **Suggestion**: [What to trace manually]
 > ```
+
+### Phase 3: Merge — Consolidate Batch Results
+
+After **all** Phase 2 batch subagents complete, read every `sast/pathtraversal-batch-*.md` file and merge them into a single `sast/pathtraversal-results.md`. You (the orchestrator) do this directly — no subagent needed.
+
+**Merge procedure**:
+
+1. Read all `sast/pathtraversal-batch-1.md`, `sast/pathtraversal-batch-2.md`, ... files.
+2. Collect all findings from each batch file and combine them into one list, preserving the original classification and all detail fields.
+3. Count totals across all batches for the executive summary.
+4. Write the merged report to `sast/pathtraversal-results.md` using this format:
+
+```markdown
+# Path Traversal Analysis Results: [Project Name]
+
+## Executive Summary
+- Sinks analyzed: [total across all batches]
+- Vulnerable: [N]
+- Likely Vulnerable: [N]
+- Not Vulnerable: [N]
+- Needs Manual Review: [N]
+
+## Findings
+
+[All findings from all batches, grouped by classification:
+ VULNERABLE first, then LIKELY VULNERABLE, then NEEDS MANUAL REVIEW, then NOT VULNERABLE.
+ Preserve every field from the batch results exactly as written.]
+```
+
+5. After writing `sast/pathtraversal-results.md`, **delete all intermediate batch files** (`sast/pathtraversal-batch-*.md`).
 
 ---
 
 ## Important Reminders
 
-- Read `sast/architecture.md` and pass its content to both subagents as context.
+- Read `sast/architecture.md` and pass its content to all subagents as context.
 - Phase 2 must run AFTER Phase 1 completes — it depends on the recon output.
+- Phase 3 must run AFTER all Phase 2 batches complete — it depends on all batch outputs.
+- Batch size is **3 sinks per subagent**. If there are 1-3 sinks total, use a single subagent. If there are 10, use 4 subagents (3+3+3+1).
+- Launch all batch subagents **in parallel** — do not run them sequentially.
+- Each batch subagent receives only its assigned sinks' text from the recon file, not the entire recon file. This keeps each subagent's context small and focused.
 - **Phase 1 is purely structural**: flag any file-loading sink where the path has a dynamic component, regardless of origin. Do not attempt to trace user input in Phase 1 — that is Phase 2's job.
 - **Phase 2 is taint analysis + mitigation review**: for each sink found in Phase 1, (a) trace the path variable back to its origin and (b) check whether an effective mitigation prevents escape from the intended directory.
 - `os.path.join` and `path.join` alone do **not** prevent traversal — `os.path.join('/base', '../etc/passwd')` resolves to `/etc/passwd`. Only `realpath` + prefix check prevents this.
@@ -497,3 +541,4 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 - Archive extraction (ZipSlip) is a path traversal variant: zip/tar entry names can contain `../` sequences. Flag any extraction that uses entry names as output paths without per-entry validation.
 - Second-order traversal is possible: a filename stored in the DB from user input may later be used in a file read elsewhere in the codebase. Treat DB-read path values as potentially tainted and trace back to where they were written.
 - When in doubt, classify as "Needs Manual Review" rather than "Not Vulnerable". False negatives are worse than false positives in security assessment.
+- Clean up intermediate files: delete `sast/pathtraversal-recon.md` and all `sast/pathtraversal-batch-*.md` files after the final `sast/pathtraversal-results.md` is written.

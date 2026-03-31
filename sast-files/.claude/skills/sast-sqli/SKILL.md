@@ -1,16 +1,18 @@
 ---
 name: sast-sqli
 description: >-
-  Detect SQL injection vulnerabilities in a codebase using a two-phase approach:
-  first find unsafe SQL construction sites (string concat, f-strings, unsafe ORM
-  methods), then trace whether user-supplied input reaches those sites. Requires
-  sast/architecture.md (run sast-analysis first). Outputs findings to
-  sast/sqli-results.md. Use when asked to find SQLi or database injection bugs.
+  Detect SQL injection vulnerabilities in a codebase using a three-phase approach:
+  recon (find unsafe SQL construction sites), batched verify (trace user input to
+  those sites in parallel subagents, 3 sites each), and merge (consolidate batch
+  results). Covers string concat, f-strings, unsafe ORM methods, and dynamic
+  identifiers. Requires sast/architecture.md (run sast-analysis first). Outputs
+  findings to sast/sqli-results.md. Use when asked to find SQLi or database
+  injection bugs.
 ---
 
 # SQL Injection (SQLi) Detection
 
-You are performing a focused security assessment to find SQL injection vulnerabilities in a codebase. This skill uses a two-phase approach with subagents: **construction** (find all places where SQL queries are built unsafely) then **taint** (confirm whether user-supplied input reaches those construction sites).
+You are performing a focused security assessment to find SQL injection vulnerabilities in a codebase. This skill uses a three-phase approach with subagents: **recon** (find vulnerable SQL construction sites), **batched verify** (taint analysis in parallel batches of 3), and **merge** (consolidate batch reports into one file).
 
 **Prerequisites**: `sast/architecture.md` must exist. Run the analysis skill first if it doesn't.
 
@@ -293,9 +295,9 @@ cursor.execute(f"SELECT * FROM products ORDER BY {sort_col}")
 
 ## Execution
 
-This skill runs in two phases using subagents. Pass the contents of `sast/architecture.md` to both subagents as context.
+This skill runs in three phases using subagents. Pass the contents of `sast/architecture.md` to all subagents as context.
 
-### Phase 1: Find Vulnerable SQL Construction Sites
+### Phase 1: Recon — Find Vulnerable SQL Construction Sites
 
 Launch a subagent with the following instructions:
 
@@ -377,19 +379,34 @@ No vulnerabilities found.
 
 Only proceed to Phase 2 if Phase 1 found at least one vulnerable construction site.
 
-### Phase 2: Trace User Input to Vulnerable Construction Sites
+### Phase 2: Verify — Taint Analysis (Batched)
 
-Launch a second subagent **after Phase 1 completes** with the following instructions:
+After Phase 1 completes, read `sast/sqli-recon.md` and split the construction sites into **batches of up to 3 sites each**. Launch **one subagent per batch in parallel**. Each subagent traces user input only for its assigned sites and writes results to its own batch file.
 
-> **Goal**: For each vulnerable SQL construction site in `sast/sqli-recon.md`, determine whether a user-supplied value reaches the interpolated variable. Write final results to `sast/sqli-results.md`.
+**Batching procedure** (you, the orchestrator, do this — not a subagent):
+
+1. Read `sast/sqli-recon.md` and count the numbered site sections under "Vulnerable Construction Sites" (### 1., ### 2., etc.).
+2. Divide them into batches of up to 3. For example, 8 sites → 3 batches (1-3, 4-6, 7-8).
+3. For each batch, extract the full text of those site sections from the recon file.
+4. Launch all batch subagents **in parallel**, passing each one only its assigned sites.
+5. Each subagent writes to `sast/sqli-batch-N.md` where N is the 1-based batch number.
+6. Identify the project's primary language/framework from `sast/architecture.md` and select **only the matching examples** from the "Vulnerable vs. Secure Examples" section above. For example, if the project uses Node.js with `pg`, include the "Node.js — pg (PostgreSQL)" and related Node examples. Include these selected examples in each subagent's instructions where indicated by `[TECH-STACK EXAMPLES]` below.
+
+Give each batch subagent the following instructions (substitute the batch-specific values):
+
+> **Goal**: For each assigned vulnerable SQL construction site, determine whether a user-supplied value reaches the interpolated variable. Our goal is to find SQL injection vulnerabilities. Write results to `sast/sqli-batch-[N].md`.
 >
-> **Context**: You will be given the project's architecture summary and the Phase 1 recon output. Use the architecture to understand request entry points, middleware, and how data flows through the application.
+> **Your assigned construction sites** (from the recon phase):
 >
-> **For each construction site, trace the interpolated variable(s) backwards to their origin**:
+> [Paste the full text of the assigned site sections here, preserving the original numbering]
+>
+> **Context**: You will be given the project's architecture summary. Use it to understand request entry points, middleware, and how data flows through the application.
+>
+> **SQLi reference — trace the interpolated variable(s) backwards to their origin**:
 >
 > 1. **Direct user input** — the variable is assigned directly from a request source with no transformation:
 >    - HTTP query params: `request.GET.get(...)`, `req.query.x`, `params[:x]`, `$_GET['x']`, `c.Query("x")`
->    - Path parameters: `request.path_params['id']`, `req.params.id`, `params[:id]`, `$_GET['id']`
+>    - Path parameters: `request.path_params['id']`, `req.params.id`, `params[:id]`
 >    - Request body / form fields: `request.POST.get(...)`, `req.body.x`, `params[:x]`, `$_POST['x']`
 >    - HTTP headers: `request.headers.get(...)`, `req.headers['x']`
 >    - Cookies: `request.COOKIES.get(...)`, `req.cookies.x`
@@ -406,28 +423,25 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 >
 > 4. **Server-side / hardcoded value** — the variable comes from config, an environment variable, a hardcoded constant, or server-side logic with no user influence — this site is NOT exploitable.
 >
-> **For each construction site, also check for mitigations that would prevent exploitation even if user input does reach it**:
-> - Is the variable validated against an allowlist before use? (Only effective for dynamic identifiers like column/table names)
-> - Is there a type cast that constrains the value? (e.g., `int(val)` — effective only in purely numeric SQL contexts)
-> - Is there a custom escaping function? Note: custom escaping (`mysql_real_escape_string`, `addslashes`, homegrown sanitizers) is **not** equivalent to parameterization — still flag as Likely Vulnerable
+> **Mitigations** (check even if user input might reach the variable):
+> - Allowlist validation before use (especially for dynamic identifiers — column/table names, `ORDER BY`)
+> - Type casts that genuinely constrain the value in context (e.g., `int(val)` in purely numeric SQL fragments)
+> - Custom escaping (`mysql_real_escape_string`, `addslashes`, homegrown sanitizers) is **not** equivalent to parameterization — still classify as Likely Vulnerable if taint is present
+>
+> **Vulnerable vs. Secure examples for this project's tech stack**:
+>
+> [TECH-STACK EXAMPLES]
 >
 > **Classification**:
 > - **Vulnerable**: User input demonstrably reaches the interpolated variable with no effective mitigation.
 > - **Likely Vulnerable**: User input probably reaches the variable (indirect flow) or only weak mitigation (custom escaping) is present.
 > - **Not Vulnerable**: The variable is server-side only, OR effective parameterization / allowlist validation is in place.
-> - **Needs Manual Review**: Cannot determine the variable's origin with confidence (passes through opaque helpers, complex conditional flows, or external libraries).
+> - **Needs Manual Review**: Cannot determine the variable's origin with confidence (opaque helpers, complex flows, external libraries).
 >
-> **Output format** — write to `sast/sqli-results.md`:
+> **Output format** — write to `sast/sqli-batch-[N].md`:
 >
 > ```markdown
-> # SQLi Analysis Results: [Project Name]
->
-> ## Executive Summary
-> - Construction sites analyzed: [N]
-> - Vulnerable: [N]
-> - Likely Vulnerable: [N]
-> - Not Vulnerable: [N]
-> - Needs Manual Review: [N]
+> # SQLi Batch [N] Results
 >
 > ## Findings
 >
@@ -435,22 +449,21 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **File**: `path/to/file.ext` (lines X-Y)
 > - **Endpoint / function**: [route or function name]
 > - **Issue**: [e.g., "HTTP query param `username` flows directly into f-string SELECT query"]
-> - **Taint trace**: [Step-by-step from entry point to the construction site — e.g., "request.GET.get('username') → username → f"SELECT ... '{username}'""]
-> - **Impact**: [What an attacker can do — extract all records, bypass authentication, delete data, etc.]
-> - **Remediation**: [Specific fix — parameterized query, ORM equivalent, or allowlist for identifiers]
+> - **Taint trace**: [Step-by-step from entry point to the construction site]
+> - **Impact**: [What an attacker can do — extract records, bypass auth, delete data, etc.]
+> - **Remediation**: [Parameterized query, ORM equivalent, or allowlist for identifiers]
 > - **Dynamic Test**:
 >   ```
->   [sqlmap command or manual curl payload to confirm this finding.
->    Show the exact parameter, payload, and what to look for in the response.
+>   [sqlmap command or manual curl payload. Show parameter, payload, expected response signal.
 >    Example: sqlmap -u "https://app.example.com/search?q=test" -p q --dbs]
 >   ```
 >
 > ### [LIKELY VULNERABLE] Descriptive name
 > - **File**: `path/to/file.ext` (lines X-Y)
 > - **Endpoint / function**: [route or function name]
-> - **Issue**: [e.g., "Variable likely sourced from user input via helper function" or "Custom escaping applied but bypassable"]
-> - **Taint trace**: [Best-effort trace with the uncertain step identified]
-> - **Concern**: [Why it's still a risk despite uncertainty]
+> - **Issue**: [e.g., "Indirect flow or custom escaping only"]
+> - **Taint trace**: [Best-effort trace; mark uncertain steps]
+> - **Concern**: [Why it remains a risk]
 > - **Remediation**: [Replace with parameterized query]
 > - **Dynamic Test**:
 >   ```
@@ -460,26 +473,61 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > ### [NOT VULNERABLE] Descriptive name
 > - **File**: `path/to/file.ext` (lines X-Y)
 > - **Endpoint / function**: [route or function name]
-> - **Reason**: [e.g., "Variable is a hardcoded server-side constant" or "Allowlist validation gates the sort column"]
+> - **Reason**: [e.g., "Server-side constant" or "Allowlist gates sort column"]
 >
 > ### [NEEDS MANUAL REVIEW] Descriptive name
 > - **File**: `path/to/file.ext` (lines X-Y)
 > - **Endpoint / function**: [route or function name]
-> - **Uncertainty**: [Why the variable's origin could not be determined]
-> - **Suggestion**: [What to trace manually — e.g., "Follow `build_filter()` in utils.py to check where its return value originates"]
+> - **Uncertainty**: [Why origin could not be determined]
+> - **Suggestion**: [What to trace manually]
 > ```
+
+### Phase 3: Merge — Consolidate Batch Results
+
+After **all** Phase 2 batch subagents complete, read every `sast/sqli-batch-*.md` file and merge them into a single `sast/sqli-results.md`. You (the orchestrator) do this directly — no subagent needed.
+
+**Merge procedure**:
+
+1. Read all `sast/sqli-batch-1.md`, `sast/sqli-batch-2.md`, ... files.
+2. Collect all findings from each batch file and combine them into one list, preserving the original classification and all detail fields.
+3. Count totals across all batches for the executive summary (construction sites analyzed = total sites from recon that were batched, i.e., sum of sites across batches).
+4. Write the merged report to `sast/sqli-results.md` using this format:
+
+```markdown
+# SQLi Analysis Results: [Project Name]
+
+## Executive Summary
+- Construction sites analyzed: [total across all batches]
+- Vulnerable: [N]
+- Likely Vulnerable: [N]
+- Not Vulnerable: [N]
+- Needs Manual Review: [N]
+
+## Findings
+
+[All findings from all batches, grouped by classification:
+ VULNERABLE first, then LIKELY VULNERABLE, then NEEDS MANUAL REVIEW, then NOT VULNERABLE.
+ Preserve every field from the batch results exactly as written.]
+```
+
+5. After writing `sast/sqli-results.md`, **delete all intermediate batch files** (`sast/sqli-batch-*.md`).
 
 ---
 
 ## Important Reminders
 
-- Read `sast/architecture.md` and pass its content to both subagents as context.
+- Read `sast/architecture.md` and pass its content to all subagents as context.
 - Phase 2 must run AFTER Phase 1 completes — it depends on the recon output.
-- **Phase 1 is purely structural**: flag any dynamic variable embedded in a SQL query string, regardless of origin. Do not attempt to trace user input in Phase 1 — that is Phase 2's job.
-- **Phase 2 is purely taint analysis**: for each site found in Phase 1, trace the interpolated variable back to its origin. If it comes from a user-controlled source, the site is a real vulnerability.
+- Phase 3 must run AFTER all Phase 2 batches complete — it depends on all batch outputs.
+- Batch size is **3 construction sites per subagent**. If there are 1-3 sites total, use a single subagent. If there are 10, use 4 subagents (3+3+3+1).
+- Launch all batch subagents **in parallel** — do not run them sequentially.
+- Each batch subagent receives only its assigned sites' text from the recon file, not the entire recon file. This keeps each subagent's context small and focused.
+- **Phase 1 is purely structural**: flag any dynamic variable embedded in a SQL query string, regardless of origin. Do not trace user input in Phase 1 — that is Phase 2's job.
+- **Phase 2 is purely taint analysis**: for each assigned site, trace the interpolated variable back to its origin. If it comes from a user-controlled source, the site is a real vulnerability.
 - Focus on **raw SQL and ORM raw/unsafe methods**. Standard ORM query builder calls (`.filter()`, `.where(col: val)`, `.find()`) are safe by default — do not flag them.
 - When in doubt, classify as "Needs Manual Review" rather than "Not Vulnerable". False negatives are worse than false positives in security assessment.
 - Taint can flow indirectly: a request parameter may be extracted in a middleware, stored in a shared object, passed through several helper functions, and finally reach the query construction. Trace the full chain.
 - Custom escaping (including `mysql_real_escape_string`, `addslashes`, or homegrown sanitizers) is **not** equivalent to parameterization — flag as Likely Vulnerable even if escaping is present.
 - For dynamic identifiers (column/table names), parameterization cannot help — the only safe fix is allowlist validation. Flag any dynamic identifier without an allowlist, regardless of whether it appears user-controlled.
 - Second-order injection is easy to miss: a value stored in the DB from user input may later be read and used unsafely in a raw query elsewhere in the codebase. In Phase 2, treat DB-read values as potentially tainted and trace back to where they were written.
+- Clean up intermediate files: delete `sast/sqli-recon.md` and all `sast/sqli-batch-*.md` files after the final `sast/sqli-results.md` is written.

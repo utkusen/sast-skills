@@ -2,16 +2,16 @@
 name: sast-xss
 description: >-
   Detect Cross-Site Scripting (XSS) vulnerabilities in a codebase using a
-  two-phase approach: first find all HTML, JavaScript, and DOM output sinks
-  where data is rendered without escaping, then trace whether user-supplied
-  input reaches those sinks. Requires sast/architecture.md (run sast-analysis
-  first). Outputs findings to sast/xss-results.md. Use when asked to find XSS
-  or cross-site scripting bugs.
+  three-phase approach: recon (find HTML/JS/DOM sink sites), batched verify
+  (trace user input to sinks in parallel subagents, 3 sink sites each), and
+  merge (consolidate batch results). Requires sast/architecture.md (run
+  sast-analysis first). Outputs findings to sast/xss-results.md. Use when asked
+  to find XSS or cross-site scripting bugs.
 ---
 
 # Cross-Site Scripting (XSS) Detection
 
-You are performing a focused security assessment to find Cross-Site Scripting vulnerabilities in a codebase. This skill uses a two-phase approach with subagents: **sink discovery** (find all places where data is rendered into HTML, JavaScript, or the DOM without proper escaping) then **taint** (confirm whether user-supplied input reaches those sinks).
+You are performing a focused security assessment to find Cross-Site Scripting vulnerabilities in a codebase. This skill uses a three-phase approach with subagents: **recon** (find sink sites), **batched verify** (trace taint for parallel batches of up to 3 sinks each), and **merge** (consolidate batch results into one report).
 
 **Prerequisites**: `sast/architecture.md` must exist. Run the analysis skill first if it doesn't.
 
@@ -355,7 +355,7 @@ tmpl.Execute(w, data)   // .Name is a plain string — auto-escaped
 
 ## Execution
 
-This skill runs in two phases using subagents. Pass the contents of `sast/architecture.md` to both subagents as context.
+This skill runs in three phases using subagents. Pass the contents of `sast/architecture.md` to all subagents as context.
 
 ### Phase 1: Find XSS Sink Sites
 
@@ -444,7 +444,7 @@ Launch a subagent with the following instructions:
 
 ### After Phase 1: Check for Candidates Before Proceeding
 
-After Phase 1 completes, read `sast/xss-recon.md`. If the recon found **zero sink sites** (the summary reports "Found 0" or the "Sink Sites" section is empty or absent), **skip Phase 2 entirely**. Instead, write the following content to `sast/xss-results.md` and stop:
+After Phase 1 completes, read `sast/xss-recon.md`. If the recon found **zero sink sites** (the summary reports "Found 0" or the "Sink Sites" section is empty or absent), **skip Phase 2 and Phase 3 entirely**. Instead, write the following content to `sast/xss-results.md` and stop (you may delete `sast/xss-recon.md` after writing):
 
 ```markdown
 # XSS Analysis Results
@@ -454,13 +454,28 @@ No vulnerabilities found.
 
 Only proceed to Phase 2 if Phase 1 found at least one sink site.
 
-### Phase 2: Trace User Input to Sink Sites
+### Phase 2: Verify — Trace User Input to Sinks (Batched)
 
-Launch a second subagent **after Phase 1 completes** with the following instructions:
+After Phase 1 completes, read `sast/xss-recon.md` and split the sink sites into **batches of up to 3 sink sites each**. Launch **one subagent per batch in parallel**. Each subagent traces taint only for its assigned sinks and writes results to its own batch file.
 
-> **Goal**: For each XSS sink site in `sast/xss-recon.md`, determine whether a user-supplied value reaches the output variable. Write final results to `sast/xss-results.md`.
+**Batching procedure** (you, the orchestrator, do this — not a subagent):
+
+1. Read `sast/xss-recon.md` and count the numbered sink sections (### 1., ### 2., etc.).
+2. Divide them into batches of up to 3. For example, 8 sinks → 3 batches (1-3, 4-6, 7-8).
+3. For each batch, extract the full text of those sink sections from the recon file.
+4. Launch all batch subagents **in parallel**, passing each one only its assigned sinks.
+5. Each subagent writes to `sast/xss-batch-N.md` where N is the 1-based batch number.
+6. Identify the project's primary language/framework from `sast/architecture.md` and select **only the matching examples** from the "Vulnerable vs. Secure Examples" section above. For example, if the project uses React with an Express API, include the relevant Node.js and React examples. Include these selected examples in each subagent's instructions where indicated by `[TECH-STACK EXAMPLES]` below.
+
+Give each batch subagent the following instructions (substitute the batch-specific values):
+
+> **Goal**: For each assigned XSS sink site, determine whether a user-supplied value reaches the output variable. Write results to `sast/xss-batch-[N].md`.
 >
-> **Context**: You will be given the project's architecture summary and the Phase 1 recon output. Use the architecture to understand request entry points, data flows, middleware, and client-side data sources.
+> **Your assigned sink sites** (from the recon phase):
+>
+> [Paste the full text of the assigned sink sections here, preserving the original numbering]
+>
+> **Context**: You will be given the project's architecture summary. Use it to understand request entry points, data flows, middleware, and client-side data sources.
 >
 > **For each sink site, trace the interpolated variable(s) backwards to their origin**:
 >
@@ -495,23 +510,20 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - Is a Content Security Policy header present that blocks inline scripts? (CSP reduces impact but is not a full fix)
 > - Is there a WAF or input validation that strictly allowlists the expected format (e.g., a numeric ID)?
 >
+> **Vulnerable vs. Secure examples for this project's tech stack**:
+>
+> [TECH-STACK EXAMPLES]
+>
 > **Classification**:
 > - **Vulnerable**: User input demonstrably reaches the sink with no effective escaping or sanitization.
 > - **Likely Vulnerable**: User input probably reaches the sink (indirect/stored flow) or only weak mitigation is present (CSP-only, WAF-only, partial sanitization, incomplete allowlist).
 > - **Not Vulnerable**: The variable is server-side only with no user influence, OR proper context-aware escaping is applied immediately before the sink.
 > - **Needs Manual Review**: Cannot determine the variable's origin with confidence (opaque helpers, complex conditional flows, external libraries, or cross-service data flows).
 >
-> **Output format** — write to `sast/xss-results.md`:
+> **Output format** — write to `sast/xss-batch-[N].md`:
 >
 > ```markdown
-> # XSS Analysis Results: [Project Name]
->
-> ## Executive Summary
-> - Sink sites analyzed: [N]
-> - Vulnerable: [N]
-> - Likely Vulnerable: [N]
-> - Not Vulnerable: [N]
-> - Needs Manual Review: [N]
+> # XSS Batch [N] Results
 >
 > ## Findings
 >
@@ -556,12 +568,46 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **Suggestion**: [What to trace manually — e.g., "Follow `buildProfileHtml()` in utils.js to check where its return value originates"]
 > ```
 
+### Phase 3: Merge — Consolidate Batch Results
+
+After **all** Phase 2 batch subagents complete, read every `sast/xss-batch-*.md` file and merge them into a single `sast/xss-results.md`. You (the orchestrator) do this directly — no subagent needed.
+
+**Merge procedure**:
+
+1. Read all `sast/xss-batch-1.md`, `sast/xss-batch-2.md`, ... files.
+2. Collect all findings from each batch file and combine them into one list, preserving the original classification and all detail fields.
+3. Count totals across all batches for the executive summary (total sink sites analyzed equals the number from recon; counts per classification sum across batches).
+4. Write the merged report to `sast/xss-results.md` using this format:
+
+```markdown
+# XSS Analysis Results: [Project Name]
+
+## Executive Summary
+- Sink sites analyzed: [total across all batches]
+- Vulnerable: [N]
+- Likely Vulnerable: [N]
+- Not Vulnerable: [N]
+- Needs Manual Review: [N]
+
+## Findings
+
+[All findings from all batches, grouped by classification:
+ VULNERABLE first, then LIKELY VULNERABLE, then NEEDS MANUAL REVIEW, then NOT VULNERABLE.
+ Preserve every field from the batch results exactly as written.]
+```
+
+5. After writing `sast/xss-results.md`, **delete all intermediate batch files** (`sast/xss-batch-*.md`).
+
 ---
 
 ## Important Reminders
 
-- Read `sast/architecture.md` and pass its content to both subagents as context.
+- Read `sast/architecture.md` and pass its content to all subagents as context.
 - Phase 2 must run AFTER Phase 1 completes — it depends on the recon output.
+- Phase 3 must run AFTER all Phase 2 batches complete — it depends on all batch outputs.
+- Batch size is **3 sink sites per subagent**. If there are 1-3 sinks total, use a single subagent. If there are 10, use 4 subagents (3+3+3+1).
+- Launch all batch subagents **in parallel** — do not run them sequentially.
+- Each batch subagent receives only its assigned sinks' text from the recon file, not the entire recon file. This keeps each subagent's context small and focused.
 - **Phase 1 is purely structural**: flag any dynamic variable passed to an HTML/JS/DOM sink, regardless of origin. Do not attempt to trace user input in Phase 1 — that is Phase 2's job.
 - **Phase 2 is purely taint analysis**: for each sink found in Phase 1, trace the variable back to its origin. If it comes from a user-controlled source with no effective escaping, the site is a real vulnerability.
 - Context matters: the same variable may be safe in one output context (HTML body with escaping) and dangerous in another (JavaScript string literal, URL attribute, or event handler attribute). Check the exact rendering context.
@@ -572,3 +618,4 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 - When in doubt, classify as "Needs Manual Review" rather than "Not Vulnerable". False negatives are worse than false positives in security assessment.
 - Angular's `DomSanitizer.bypassSecurityTrust*` methods are always suspicious — flag them whenever the argument is not a hardcoded constant.
 - For JavaScript execution sinks (`eval`, `setTimeout` with string arg), even seemingly innocuous data (error messages, IDs) can be dangerous if an attacker can influence them.
+- Clean up intermediate files: delete `sast/xss-recon.md` and all `sast/xss-batch-*.md` files after the final `sast/xss-results.md` is written.

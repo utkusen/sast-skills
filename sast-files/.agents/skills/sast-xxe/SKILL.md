@@ -2,16 +2,16 @@
 name: sast-xxe
 description: >-
   Detect XML External Entity (XXE) vulnerabilities in a codebase using a
-  two-phase approach: first find all XML parsing sites where external entity
-  resolution is not explicitly disabled, then trace whether user-supplied input
-  reaches those parsers. Requires sast/architecture.md (run sast-analysis
-  first). Outputs findings to sast/xxe-results.md. Use when asked to find XXE
-  or XML injection bugs.
+  three-phase approach: recon (find XML parsing sites without external-entity
+  hardening), batched verify (trace user input to each site in parallel
+  subagents, 3 sites each), and merge (consolidate batch results). Requires
+  sast/architecture.md (run sast-analysis first). Outputs findings to
+  sast/xxe-results.md. Use when asked to find XXE or XML injection bugs.
 ---
 
 # XML External Entity (XXE) Detection
 
-You are performing a focused security assessment to find XXE vulnerabilities in a codebase. This skill uses a two-phase approach with subagents: **recon** (find all XML parsing sites where external entities are not safely disabled) then **taint** (confirm whether user-supplied input reaches those parsers).
+You are performing a focused security assessment to find XXE vulnerabilities in a codebase. This skill uses a three-phase approach with subagents: **recon** (find XML parsing sites where external entities are not safely disabled), **batched verify** (trace whether user-supplied input reaches those parsers, in parallel batches of 3), and **merge** (consolidate batch results into one report).
 
 **Prerequisites**: `sast/architecture.md` must exist. Run the analysis skill first if it doesn't.
 
@@ -300,7 +300,7 @@ func parseXML(data []byte) {
 
 ## Execution
 
-This skill runs in two phases using subagents. Pass the contents of `sast/architecture.md` to both subagents as context.
+This skill runs in three phases using subagents. Pass the contents of `sast/architecture.md` to all subagents as context.
 
 ### Phase 1: Find Vulnerable XML Parsing Sites
 
@@ -395,7 +395,7 @@ Launch a subagent with the following instructions:
 
 ### Between Phases: Check Recon Results
 
-After Phase 1 completes, read `sast/xxe-recon.md`. If the summary states zero vulnerable parsing sites were found (or the file contains no entries under "Vulnerable Parsing Sites"), **do not launch Phase 2**. Instead, write the following to `sast/xxe-results.md` and stop:
+After Phase 1 completes, read `sast/xxe-recon.md`. If the summary states zero vulnerable parsing sites were found (or the file contains no entries under "Vulnerable Parsing Sites"), **do not launch Phase 2 or Phase 3**. Instead, write the following to `sast/xxe-results.md`, **delete** `sast/xxe-recon.md`, and stop:
 
 ```
 No vulnerabilities found.
@@ -403,13 +403,32 @@ No vulnerabilities found.
 
 Only proceed to Phase 2 if at least one vulnerable parsing site was identified in the recon output.
 
-### Phase 2: Trace User Input to Vulnerable Parsing Sites
+### Phase 2: Verify — Trace User Input (Batched)
 
-Launch a second subagent **after Phase 1 completes** with the following instructions:
+After Phase 1 completes, read `sast/xxe-recon.md` and split the entries under "Vulnerable Parsing Sites" into **batches of up to 3 sites each** (use the numbered `###` sections: ### 1., ### 2., etc.). Launch **one subagent per batch in parallel**. Each subagent traces taint only for its assigned sites and writes results to its own batch file.
 
-> **Goal**: For each vulnerable XML parsing site in `sast/xxe-recon.md`, determine whether a user-supplied value reaches the XML parser. Write final results to `sast/xxe-results.md`.
+**Batching procedure** (you, the orchestrator, do this — not a subagent):
+
+1. Read `sast/xxe-recon.md` and count the numbered site sections (### 1., ### 2., etc.).
+2. Divide them into batches of up to 3. For example, 8 sites → 3 batches (1-3, 4-6, 7-8).
+3. For each batch, extract the full text of those site sections from the recon file.
+4. Launch all batch subagents **in parallel**, passing each one only its assigned sites.
+5. Each subagent writes to `sast/xxe-batch-N.md` where N is the 1-based batch number.
+6. Identify the project's primary language/framework from `sast/architecture.md` and select **only the matching examples** from the "Vulnerable vs. Secure Examples" section above. For example, if the project uses Java with DocumentBuilder, include only the Java-related examples. Include these selected examples in each subagent's instructions where indicated by `[TECH-STACK EXAMPLES]` below.
+
+Give each batch subagent the following instructions (substitute the batch-specific values):
+
+> **Goal**: For each assigned vulnerable XML parsing site, determine whether a user-supplied value reaches the XML parser. Our goal is to find XXE vulnerabilities. Write results to `sast/xxe-batch-[N].md`.
 >
-> **Context**: You will be given the project's architecture summary and the Phase 1 recon output. Use the architecture to understand request entry points, middleware, file upload handlers, and how data flows through the application.
+> **Your assigned parsing sites** (from the recon phase):
+>
+> [Paste the full text of the assigned site sections here, preserving the original numbering]
+>
+> **Context**: You will be given the project's architecture summary. Use it to understand request entry points, middleware, file upload handlers, and how data flows through the application.
+>
+> **XXE reference — What to look for**:
+>
+> User-controlled XML must not reach a parser that allows external entity resolution without hardening. Trace each site's XML input back to its origin.
 >
 > **For each parsing site, trace the XML input variable(s) backwards to their origin**:
 >
@@ -429,7 +448,7 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 >    - Find where the stored content was originally written — was it user-supplied at that point?
 >    - Was it validated or sanitized at write time?
 >
-> 4. **Server-side / hardcoded source** — the XML comes from a bundled resource, config file loaded at startup, or server-generated content with no user influence — this site is NOT exploitable.
+> 4. **Server-side / hardcoded source** — the XML comes from a bundled resource, config file loaded at startup, or server-generated content with no user influence — this site is NOT exploitable as XXE from user input.
 >
 > **For each parsing site, also assess exploitability**:
 > - Is the response returned to the caller? (Reflected XXE — attacker can read file contents directly)
@@ -437,23 +456,20 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - Is the application behind authentication? (Reduces severity but does not eliminate the vulnerability)
 > - Is the parser used in a context where only specific XML schemas are accepted? (e.g., SOAP envelope validation — still exploitable if DTD processing is on)
 >
+> **Vulnerable vs. Secure examples for this project's tech stack**:
+>
+> [TECH-STACK EXAMPLES]
+>
 > **Classification**:
 > - **Vulnerable**: User input demonstrably reaches the XML parser and the parser has no external entity hardening. Response or out-of-band channel allows exfiltration.
 > - **Likely Vulnerable**: User input probably reaches the parser (indirect flow), or the parser is unhardened but the exploitation path is partially obscured.
 > - **Not Vulnerable**: The XML source is fully server-controlled, OR the parser has proper hardening in place (DTD disabled, external entities disabled).
 > - **Needs Manual Review**: Cannot determine the input source with confidence, or the hardening configuration is complex and requires runtime verification.
 >
-> **Output format** — write to `sast/xxe-results.md`:
+> **Output format** — write to `sast/xxe-batch-[N].md`:
 >
 > ```markdown
-> # XXE Analysis Results: [Project Name]
->
-> ## Executive Summary
-> - Parsing sites analyzed: [N]
-> - Vulnerable: [N]
-> - Likely Vulnerable: [N]
-> - Not Vulnerable: [N]
-> - Needs Manual Review: [N]
+> # XXE Batch [N] Results
 >
 > ## Findings
 >
@@ -501,12 +517,46 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **Suggestion**: [What to trace manually — e.g., "Follow `load_document()` in xml_utils.py to confirm whether its argument comes from a user request"]
 > ```
 
+### Phase 3: Merge — Consolidate Batch Results
+
+After **all** Phase 2 batch subagents complete, read every `sast/xxe-batch-*.md` file and merge them into a single `sast/xxe-results.md`. You (the orchestrator) do this directly — no subagent needed.
+
+**Merge procedure**:
+
+1. Read all `sast/xxe-batch-1.md`, `sast/xxe-batch-2.md`, ... files.
+2. Collect all findings from each batch file and combine them into one list, preserving the original classification and all detail fields.
+3. Count totals across all batches for the executive summary.
+4. Write the merged report to `sast/xxe-results.md` using this format:
+
+```markdown
+# XXE Analysis Results: [Project Name]
+
+## Executive Summary
+- Parsing sites analyzed: [total across all batches]
+- Vulnerable: [N]
+- Likely Vulnerable: [N]
+- Not Vulnerable: [N]
+- Needs Manual Review: [N]
+
+## Findings
+
+[All findings from all batches, grouped by classification:
+ VULNERABLE first, then LIKELY VULNERABLE, then NEEDS MANUAL REVIEW, then NOT VULNERABLE.
+ Preserve every field from the batch results exactly as written.]
+```
+
+5. After writing `sast/xxe-results.md`, **delete all intermediate files**: `sast/xxe-recon.md` and `sast/xxe-batch-*.md`.
+
 ---
 
 ## Important Reminders
 
-- Read `sast/architecture.md` and pass its content to both subagents as context.
+- Read `sast/architecture.md` and pass its content to all subagents as context.
 - Phase 2 must run AFTER Phase 1 completes — it depends on the recon output.
+- Phase 3 must run AFTER all Phase 2 batches complete — it depends on all batch outputs.
+- Batch size is **3 parsing sites per subagent**. If there are 1-3 sites total, use a single subagent. If there are 10, use 4 subagents (3+3+3+1).
+- Launch all batch subagents **in parallel** — do not run them sequentially.
+- Each batch subagent receives only its assigned sites' text from the recon file, not the entire recon file. This keeps each subagent's context small and focused.
 - **Phase 1 is purely structural**: flag any XML parsing call that lacks explicit external entity hardening, regardless of where the input comes from. Do not attempt to trace user input in Phase 1 — that is Phase 2's job.
 - **Phase 2 is purely taint analysis**: for each site found in Phase 1, trace the XML input back to its origin. If it comes from a user-controlled source, the site is a real vulnerability.
 - **Parser defaults matter**: Java DOM/SAX, PHP SimpleXML/DOMDocument, and lxml all resolve external entities by default — they require explicit hardening. Python's `defusedxml` and Go's `encoding/xml` are safe by default.
@@ -515,3 +565,4 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 - When in doubt, classify as "Needs Manual Review" rather than "Not Vulnerable". False negatives are worse than false positives in security assessment.
 - Taint can flow indirectly: a file upload may be saved to disk in one handler, then parsed in another background job. Trace the full chain including asynchronous processing paths.
 - Blind XXE (no output in response) is still exploitable via DNS or HTTP callbacks to attacker-controlled servers. Do not dismiss a finding just because the parsed XML is not echoed back.
+- Clean up intermediate files: after the final `sast/xxe-results.md` is written, ensure `sast/xxe-recon.md` and all `sast/xxe-batch-*.md` files are deleted (on the zero-findings early exit, only `sast/xxe-recon.md` is deleted).

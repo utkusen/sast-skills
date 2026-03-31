@@ -2,16 +2,16 @@
 name: sast-ssrf
 description: >-
   Detect Server-Side Request Forgery (SSRF) vulnerabilities in a codebase using
-  a two-phase approach: first find all outbound network call sites (HTTP, TCP,
-  DNS requests to remote hosts), then trace whether user-supplied input reaches
-  those call sites. Requires sast/architecture.md (run sast-analysis first).
-  Outputs findings to sast/ssrf-results.md. Use when asked to find SSRF or
-  server-side request forgery bugs.
+  a three-phase approach: recon (find outbound call sites), batched verify (trace
+  user input to destinations in parallel subagents, 3 sites each), and merge
+  (consolidate batch results). Requires sast/architecture.md (run sast-analysis
+  first). Outputs findings to sast/ssrf-results.md. Use when asked to find SSRF
+  or server-side request forgery bugs.
 ---
 
 # Server-Side Request Forgery (SSRF) Detection
 
-You are performing a focused security assessment to find SSRF vulnerabilities in a codebase. This skill uses a two-phase approach with subagents: **recon** (find all places that make outbound TCP, DNS, or HTTP requests) then **taint** (confirm whether user-supplied input influences those call sites).
+You are performing a focused security assessment to find SSRF vulnerabilities in a codebase. This skill uses a three-phase approach with subagents: **recon** (find all places that make outbound TCP, DNS, or HTTP requests), **batched verify** (trace whether user-supplied input reaches those call sites, in parallel batches of 3), and **merge** (consolidate batch reports into one file).
 
 **Prerequisites**: `sast/architecture.md` must exist. Run the analysis skill first if it doesn't.
 
@@ -259,7 +259,7 @@ public async Task<IActionResult> Proxy([FromQuery] string url)
 
 ## Execution
 
-This skill runs in two phases using subagents. Pass the contents of `sast/architecture.md` to both subagents as context.
+This skill runs in three phases using subagents. Pass the contents of `sast/architecture.md` to all subagents as context.
 
 ### Phase 1: Find All Outbound Network Call Sites
 
@@ -366,7 +366,7 @@ Launch a subagent with the following instructions:
 
 ### After Phase 1: Check for Candidates Before Proceeding
 
-After Phase 1 completes, read `sast/ssrf-recon.md`. If the recon found **zero outbound call sites** (the summary reports "Found 0" or the "Outbound Call Sites" section is empty or absent), **skip Phase 2 entirely**. Instead, write the following content to `sast/ssrf-results.md` and stop:
+After Phase 1 completes, read `sast/ssrf-recon.md`. If the recon found **zero outbound call sites** (the summary reports "Found 0" or the "Outbound Call Sites" section is empty or absent), **skip Phase 2 and Phase 3 entirely**. Instead, write the following content to `sast/ssrf-results.md` and stop:
 
 ```markdown
 # SSRF Analysis Results
@@ -376,13 +376,38 @@ No vulnerabilities found.
 
 Only proceed to Phase 2 if Phase 1 found at least one outbound call site.
 
-### Phase 2: Trace User Input to Outbound Call Sites
+### Phase 2: Verify — Trace User Input to Outbound Call Sites (Batched)
 
-Launch a second subagent **after Phase 1 completes** with the following instructions:
+After Phase 1 completes, read `sast/ssrf-recon.md` and split the outbound call sites into **batches of up to 3 sites each**. Launch **one subagent per batch in parallel**. Each subagent traces taint only for its assigned sites and writes results to its own batch file.
 
-> **Goal**: For each outbound network call site in `sast/ssrf-recon.md`, determine whether a user-supplied value controls or influences the destination (URL, host, path, port, or scheme). Write final results to `sast/ssrf-results.md`.
+**Batching procedure** (you, the orchestrator, do this — not a subagent):
+
+1. Read `sast/ssrf-recon.md` and count the numbered site sections (### 1., ### 2., etc.) under "Outbound Call Sites".
+2. Divide them into batches of up to 3. For example, 8 sites → 3 batches (1-3, 4-6, 7-8).
+3. For each batch, extract the full text of those site sections from the recon file.
+4. Launch all batch subagents **in parallel**, passing each one only its assigned sites.
+5. Each subagent writes to `sast/ssrf-batch-N.md` where N is the 1-based batch number.
+6. Identify the project's primary language/framework from `sast/architecture.md` and select **only the matching examples** from the "Vulnerable vs. Secure Examples" section above. For example, if the project uses Node.js with fetch/axios, include only the "Node.js — fetch / axios" and "Node.js — http.request" examples. Include these selected examples in each subagent's instructions where indicated by `[TECH-STACK EXAMPLES]` below.
+
+Give each batch subagent the following instructions (substitute the batch-specific values):
+
+> **Goal**: For each assigned outbound network call site, determine whether a user-supplied value controls or influences the destination (URL, host, path, port, or scheme). Our goal is to find SSRF vulnerabilities. Write results to `sast/ssrf-batch-[N].md`.
 >
-> **Context**: You will be given the project's architecture summary and the Phase 1 recon output. Use the architecture to understand entry points, middleware, and how data flows through the application.
+> **Your assigned outbound call sites** (from the recon phase):
+>
+> [Paste the full text of the assigned site sections here, preserving the original numbering]
+>
+> **Context**: You will be given the project's architecture summary. Use it to understand entry points, middleware, and how data flows through the application.
+>
+> **SSRF reference — what to look for**:
+>
+> SSRF occurs when user-controlled input reaches the destination argument of a server-side outbound network call without an effective allowlist on where the server may connect.
+>
+> **What SSRF is NOT** — do not flag these as SSRF:
+> - **Open redirects**: HTTP 302 to a user URL — client-side redirect, not a server-side request
+> - **XSS via URL**: User URL rendered in HTML without escaping — XSS
+> - **IDOR**: Object ID tampering — separate class
+> - **Fully hardcoded outbound URLs** with no user influence — not SSRF
 >
 > **For each outbound call site, trace the destination argument(s) backwards to their origin**:
 >
@@ -410,23 +435,20 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **Blocklist of private IP ranges / metadata endpoints**: `169.254.169.254`, `10.0.0.0/8`, `192.168.0.0/16`, etc. — **not** sufficient. Bypassable via DNS rebinding, alternate IP representations, and redirect chains. Flag as Likely Vulnerable.
 > - **DNS resolution + IP check** (resolve hostname first, then check resolved IP against blocklist): Stronger than a pure blocklist, but still susceptible to DNS rebinding between the check and the request (TOCTOU). Flag as Likely Vulnerable unless the same resolved IP is explicitly pinned for the request.
 >
+> **Vulnerable vs. secure examples for this project's tech stack**:
+>
+> [TECH-STACK EXAMPLES]
+>
 > **Classification**:
 > - **Vulnerable**: User input demonstrably reaches the outbound request destination with no effective mitigation (no allowlist or only a blocklist/scheme check).
 > - **Likely Vulnerable**: User input probably reaches the destination (indirect flow or partial construction), or only weak mitigation is present (blocklist, scheme-only check, partial URL prefix).
 > - **Not Vulnerable**: The destination is fully server-side, OR a strict host/prefix allowlist is enforced before the request.
 > - **Needs Manual Review**: Cannot determine the destination's origin with confidence (opaque helpers, complex conditional flows, or external libraries that resolve the URL).
 >
-> **Output format** — write to `sast/ssrf-results.md`:
+> **Output format** — write to `sast/ssrf-batch-[N].md`:
 >
 > ```markdown
-> # SSRF Analysis Results: [Project Name]
->
-> ## Executive Summary
-> - Outbound call sites analyzed: [N]
-> - Vulnerable: [N]
-> - Likely Vulnerable: [N]
-> - Not Vulnerable: [N]
-> - Needs Manual Review: [N]
+> # SSRF Batch [N] Results
 >
 > ## Findings
 >
@@ -470,17 +492,52 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **Suggestion**: [What to trace manually — e.g., "Follow `resolve_target()` in helpers.py to check where the URL originates"]
 > ```
 
+### Phase 3: Merge — Consolidate Batch Results
+
+After **all** Phase 2 batch subagents complete, read every `sast/ssrf-batch-*.md` file and merge them into a single `sast/ssrf-results.md`. You (the orchestrator) do this directly — no subagent needed.
+
+**Merge procedure**:
+
+1. Read all `sast/ssrf-batch-1.md`, `sast/ssrf-batch-2.md`, ... files.
+2. Collect all findings from each batch file and combine them into one list, preserving the original classification and all detail fields.
+3. Count totals across all batches for the executive summary (total sites analyzed equals the number from recon / sum of assigned sites).
+4. Write the merged report to `sast/ssrf-results.md` using this format:
+
+```markdown
+# SSRF Analysis Results: [Project Name]
+
+## Executive Summary
+- Outbound call sites analyzed: [total across all batches]
+- Vulnerable: [N]
+- Likely Vulnerable: [N]
+- Not Vulnerable: [N]
+- Needs Manual Review: [N]
+
+## Findings
+
+[All findings from all batches, grouped by classification:
+ VULNERABLE first, then LIKELY VULNERABLE, then NEEDS MANUAL REVIEW, then NOT VULNERABLE.
+ Preserve every field from the batch results exactly as written.]
+```
+
+5. After writing `sast/ssrf-results.md`, **delete all intermediate batch files** (`sast/ssrf-batch-*.md`).
+
 ---
 
 ## Important Reminders
 
-- Read `sast/architecture.md` and pass its content to both subagents as context.
+- Read `sast/architecture.md` and pass its content to all subagents as context.
 - Phase 2 must run AFTER Phase 1 completes — it depends on the recon output.
+- Phase 3 must run AFTER all Phase 2 batches complete — it depends on all batch outputs.
+- Batch size is **3 outbound call sites per subagent**. If there are 1-3 sites total, use a single subagent. If there are 10, use 4 subagents (3+3+3+1).
+- Launch all batch subagents **in parallel** — do not run them sequentially.
+- Each batch subagent receives only its assigned sites' text from the recon file, not the entire recon file. This keeps each subagent's context small and focused.
 - **Phase 1 is purely structural**: flag any call site where the destination argument is dynamic (a variable, expression, or assembled string), regardless of whether user input flows there. Do not attempt to trace user input in Phase 1 — that is Phase 2's job.
-- **Phase 2 is purely taint analysis**: for each site found in Phase 1, trace the destination argument back to its origin. If it comes from a user-controlled source without an effective allowlist, the site is a real vulnerability.
+- **Phase 2 is purely taint analysis**: for each site in its batch, trace the destination argument back to its origin. If it comes from a user-controlled source without an effective allowlist, the site is a real vulnerability.
 - **Blocklists are not mitigations**: IP blocklists for private ranges and cloud metadata endpoints are easily bypassed. Always classify such sites as Vulnerable or Likely Vulnerable, not as safe.
 - **Partial URL control is still dangerous**: even if the attacker only controls the path or query string portion of the URL, flag it as Likely Vulnerable — depending on the HTTP client behavior, redirect following, and target service, partial control can be enough.
 - **Stored destinations are tainted**: if a URL or hostname was accepted from user input at write time and is later used for an outbound request, trace the write-time acceptance. Lack of allowlist validation at write time makes it SSRF.
 - **Subprocess curl/wget is SSRF too**: shell-outs that run `curl` or `wget` with a user-supplied URL are just as dangerous as HTTP client calls. Check for these, especially in image-processing, import, or download features.
 - When in doubt, classify as "Needs Manual Review" rather than "Not Vulnerable". False negatives are worse than false positives in security assessment.
 - DNS rebinding note: for findings where only a DNS-resolution-then-blocklist check is present, note the TOCTOU window explicitly in the finding — this is a known bypass technique.
+- Clean up intermediate files: delete `sast/ssrf-recon.md` and all `sast/ssrf-batch-*.md` files after the final `sast/ssrf-results.md` is written.

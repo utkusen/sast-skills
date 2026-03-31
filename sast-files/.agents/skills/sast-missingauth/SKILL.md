@@ -2,18 +2,19 @@
 name: sast-missingauth
 description: >-
   Detect missing authentication and broken function-level authorization
-  vulnerabilities in a codebase using a two-phase approach: first map all
-  endpoints and the role/permission system, then verify each endpoint has
-  proper authentication and authorization checks. Covers unauthenticated
-  access and vertical privilege escalation (e.g., regular user accessing
-  admin-only functions). Requires sast/architecture.md (run sast-analysis
-  first). Outputs findings to sast/missingauth-results.md. Use when asked
-  to find missing auth, broken access control, or privilege escalation bugs.
+  vulnerabilities in a codebase using a three-phase approach: recon (map
+  endpoints and the role/permission system), batched verify (check auth/authz
+  in parallel subagents, 3 endpoints each), and merge (consolidate batch
+  results). Covers unauthenticated access and vertical privilege escalation
+  (e.g., regular user accessing admin-only functions). Requires
+  sast/architecture.md (run sast-analysis first). Outputs findings to
+  sast/missingauth-results.md. Use when asked to find missing auth, broken
+  access control, or privilege escalation bugs.
 ---
 
 # Missing Authentication & Broken Function-Level Authorization Detection
 
-You are performing a focused security assessment to find missing authentication and broken function-level authorization vulnerabilities in a codebase. This skill uses a two-phase approach with subagents: **recon** (map endpoints and the permission system) then **verify** (check every endpoint for proper auth/authz gates).
+You are performing a focused security assessment to find missing authentication and broken function-level authorization vulnerabilities in a codebase. This skill uses a three-phase approach with subagents: **recon** (map endpoints and the permission system), **batched verify** (check authentication and authorization in parallel batches of 3 endpoints each), and **merge** (consolidate batch results into the final report).
 
 **Prerequisites**: `sast/architecture.md` must exist. Run the analysis skill first if it doesn't.
 
@@ -332,7 +333,7 @@ public async Task<IActionResult> DeleteUser(int id) {
 
 ## Execution
 
-This skill runs in two phases using subagents. Pass the contents of `sast/architecture.md` to both subagents as context.
+This skill runs in three phases using subagents. Pass the contents of `sast/architecture.md` to all subagents as context.
 
 ### Phase 1: Recon — Map Endpoints and Permission System
 
@@ -411,15 +412,50 @@ Launch a subagent with the following instructions:
 > [Repeat for each endpoint]
 > ```
 
-### Phase 2: Verify — Check Authentication and Authorization
+### Phase 2: Verify — Check Authentication and Authorization (Batched)
 
-Launch a second subagent **after Phase 1 completes** with the following instructions:
+After Phase 1 completes, read `sast/missingauth-recon.md` and split the endpoint inventory into **batches of up to 3 endpoints each** (each numbered `### N.` under **Endpoint Inventory**). Launch **one subagent per batch in parallel**. Each subagent verifies only its assigned endpoints and writes results to its own batch file.
 
-> **Goal**: For each endpoint in `sast/missingauth-recon.md`, determine whether it has adequate authentication and authorization checks. Write final results to `sast/missingauth-results.md`.
+**Batching procedure** (you, the orchestrator, do this — not a subagent):
+
+1. Read `sast/missingauth-recon.md` and count the numbered endpoint sections under **Endpoint Inventory** (`### 1.`, `### 2.`, etc.).
+2. Divide them into batches of up to 3. For example, 8 endpoints → 3 batches (1–3, 4–6, 7–8).
+3. For each batch, extract the full text of those endpoint sections from the recon file.
+4. Launch all batch subagents **in parallel**, passing each one only its assigned endpoints.
+5. Each subagent writes to `sast/missingauth-batch-N.md` where N is the 1-based batch number.
+6. Identify the project's primary language/framework from `sast/architecture.md` and select **only the matching examples** from the "Vulnerable vs. Secure Examples" section above. For example, if the project uses Python/Django, include only the "Python — Django" (and if relevant, Flask) examples. Include these selected examples in each subagent's instructions where indicated by `[TECH-STACK EXAMPLES]` below.
+
+Give each batch subagent the following instructions (substitute the batch-specific values):
+
+> **Goal**: Verify the following endpoints for missing authentication and broken function-level authorization vulnerabilities. Write results to `sast/missingauth-batch-[N].md`.
 >
-> **Context**: You will be given the project's architecture summary and the recon results. Use the architecture summary to understand the middleware ordering, role definitions, and auth patterns.
+> **Your assigned endpoints** (from the recon phase):
 >
-> **For each endpoint, evaluate**:
+> [Paste the full text of the assigned endpoint sections here, preserving the original numbering]
+>
+> **Context**: You will be given the project's architecture summary. Use it to understand the middleware ordering, role definitions, and auth patterns.
+>
+> **Missing auth / broken function-level auth — what to look for**:
+>
+> - **Missing authentication**: Sensitive action with no login/session/token required.
+> - **Broken function-level authorization**: Authentication is required but no role/permission check on a privileged endpoint (vertical escalation).
+>
+> **What this skill is NOT** — do not flag these here:
+> - **IDOR / horizontal escalation**: User A accessing user B's resource by changing an ID → covered by the IDOR skill.
+> - **JWT crypto/verification bugs** → covered by sast-jwt.
+>
+> **Authorization patterns that PREVENT issues** — if you see these, the endpoint is likely safe:
+> 1. **Authentication + role-check middleware on a route group** (e.g., `router.use('/admin', auth, requireRole('admin'))`)
+> 2. **Declarative role annotations** (e.g., `@PreAuthorize("hasRole('ADMIN')")`)
+> 3. **In-handler role check** before sensitive action
+> 4. **Middleware gate on entire prefix** (e.g., Chi `r.Group` with `AdminOnly`)
+> 5. **Policy/Gate** objects enforcing privileged actions
+>
+> **Vulnerable vs. Secure examples for this project's tech stack**:
+>
+> [TECH-STACK EXAMPLES]
+>
+> **For each assigned endpoint, evaluate**:
 >
 > 1. **Authentication check** — is a valid login/session/token required?
 >    - Is there an auth middleware, decorator, or guard on this route or its parent group?
@@ -448,17 +484,10 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **Not Vulnerable**: Proper authentication and role/permission checks are in place.
 > - **Needs Manual Review**: Cannot determine with confidence (e.g., complex middleware chain, dynamic role loading, authorization delegated to a service layer).
 >
-> **Output format** — write to `sast/missingauth-results.md`:
+> **Output format** — write to `sast/missingauth-batch-[N].md`:
 >
 > ```markdown
-> # Missing Auth/Authz Analysis Results: [Project Name]
->
-> ## Executive Summary
-> - Endpoints analyzed: [N]
-> - Vulnerable: [N]
-> - Likely Vulnerable: [N]
-> - Not Vulnerable: [N]
-> - Needs Manual Review: [N]
+> # Missing Auth Batch [N] Results
 >
 > ## Findings
 >
@@ -501,15 +530,50 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **Suggestion**: [What to look at manually]
 > ```
 
+### Phase 3: Merge — Consolidate Batch Results
+
+After **all** Phase 2 batch subagents complete, read every `sast/missingauth-batch-*.md` file and merge them into a single `sast/missingauth-results.md`. You (the orchestrator) do this directly — no subagent needed.
+
+**Merge procedure**:
+
+1. Read all `sast/missingauth-batch-1.md`, `sast/missingauth-batch-2.md`, ... files.
+2. Collect all findings from each batch file and combine them into one list, preserving the original classification and all detail fields.
+3. Count totals across all batches for the executive summary.
+4. Write the merged report to `sast/missingauth-results.md` using this format:
+
+```markdown
+# Missing Auth/Authz Analysis Results: [Project Name]
+
+## Executive Summary
+- Endpoints analyzed: [total across all batches]
+- Vulnerable: [N]
+- Likely Vulnerable: [N]
+- Not Vulnerable: [N]
+- Needs Manual Review: [N]
+
+## Findings
+
+[All findings from all batches, grouped by classification:
+ VULNERABLE first, then LIKELY VULNERABLE, then NEEDS MANUAL REVIEW, then NOT VULNERABLE.
+ Preserve every field from the batch results exactly as written.]
+```
+
+5. After writing `sast/missingauth-results.md`, **delete all intermediate files**: `sast/missingauth-recon.md` and `sast/missingauth-batch-*.md`.
+
 ---
 
 ## Important Reminders
 
-- Read `sast/architecture.md` and pass its content to both subagents as context.
+- Read `sast/architecture.md` and pass its content to all subagents as context.
 - Phase 2 must run AFTER Phase 1 completes — it depends on the recon output.
+- Phase 3 must run AFTER all Phase 2 batches complete — it depends on all batch outputs.
+- Batch size is **3 endpoints per subagent**. If there are 1–3 endpoints total, use a single subagent. If there are 10, use 4 subagents (3+3+3+1).
+- Launch all batch subagents **in parallel** — do not run them sequentially.
+- Each batch subagent receives only its assigned endpoints' text from the recon file, not the entire recon file. This keeps each subagent's context small and focused.
 - Focus on **vertical privilege escalation** (user → admin) and **unauthenticated access**. Horizontal escalation (user A → user B's resource) is covered by the IDOR skill.
 - Authentication (you are who you say you are) and authorization (you are allowed to do this) are separate concerns — check both.
 - Middleware order matters: a middleware registered after the route handler will NOT protect the route.
 - A missing auth or role check on one HTTP method (e.g., DELETE) is a full vulnerability even if GET is protected.
 - When in doubt, classify as "Needs Manual Review" rather than "Not Vulnerable". False negatives are worse than false positives in security assessment.
 - Pay attention to route grouping: a `use('/admin', adminRouter)` pattern protects all routes in `adminRouter`, but routes mounted outside that group are not protected.
+- Clean up intermediate files: delete `sast/missingauth-recon.md` and all `sast/missingauth-batch-*.md` files after the final `sast/missingauth-results.md` is written.

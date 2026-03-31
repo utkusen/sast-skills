@@ -2,16 +2,16 @@
 name: sast-ssti
 description: >-
   Detect Server-Side Template Injection (SSTI) vulnerabilities in a codebase
-  using a two-phase approach: first find all template rendering sites where
-  user-supplied input is used as the template string itself (not as context
-  data), then trace whether user-supplied input actually reaches those sites.
-  Requires sast/architecture.md (run sast-analysis first). Outputs findings to
+  using a three-phase approach: recon (find template rendering sites that use
+  dynamic strings), batched verify (trace user input to those sites in parallel
+  subagents, 3 candidates each), and merge (consolidate batch results). Requires
+  sast/architecture.md (run sast-analysis first). Outputs findings to
   sast/ssti-results.md. Use when asked to find SSTI or template injection bugs.
 ---
 
 # Server-Side Template Injection (SSTI) Detection
 
-You are performing a focused security assessment to find Server-Side Template Injection vulnerabilities in a codebase. This skill uses a two-phase approach with subagents: **recon** (find all places where templates are rendered from dynamic strings) then **taint** (confirm whether user-supplied input reaches those rendering sites as the template string).
+You are performing a focused security assessment to find Server-Side Template Injection vulnerabilities in a codebase. This skill uses a three-phase approach with subagents: **recon** (find candidate rendering sites where the template string is dynamic), **batched verify** (trace whether user input reaches each site's template argument, in parallel batches of 3), and **merge** (consolidate batch results into the final report).
 
 **Prerequisites**: `sast/architecture.md` must exist. Run the analysis skill first if it doesn't.
 
@@ -304,7 +304,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 ## Execution
 
-This skill runs in two phases using subagents. Pass the contents of `sast/architecture.md` to both subagents as context.
+This skill runs in three phases using subagents. Pass the contents of `sast/architecture.md` to all subagents as context.
 
 ### Phase 1: Find Template Rendering Sites Using Dynamic Strings
 
@@ -428,7 +428,7 @@ Launch a subagent with the following instructions:
 
 ### After Phase 1: Check for Candidates Before Proceeding
 
-After Phase 1 completes, read `sast/ssti-recon.md`. If the recon found **zero candidate rendering sites** (the summary reports "Found 0" or the "Candidate Rendering Sites" section is empty or absent), **skip Phase 2 entirely**. Instead, write the following content to `sast/ssti-results.md` and stop:
+After Phase 1 completes, read `sast/ssti-recon.md`. If the recon found **zero candidate rendering sites** (the summary reports "Found 0" or the "Candidate Rendering Sites" section is empty or absent), **skip Phase 2 and Phase 3 entirely**. Instead, write the following content to `sast/ssti-results.md` and stop:
 
 ```markdown
 # SSTI Analysis Results
@@ -438,15 +438,32 @@ No vulnerabilities found.
 
 Only proceed to Phase 2 if Phase 1 found at least one candidate rendering site.
 
-### Phase 2: Trace User Input to Template Rendering Sites
+### Phase 2: Verify — Trace User Input (Batched)
 
-Launch a second subagent **after Phase 1 completes** with the following instructions:
+After Phase 1 completes, read `sast/ssti-recon.md` and split the candidate rendering sites into **batches of up to 3 candidates each**. Launch **one subagent per batch in parallel**. Each subagent traces taint for only its assigned candidates and writes results to its own batch file.
 
-> **Goal**: For each candidate template rendering site in `sast/ssti-recon.md`, determine whether a user-supplied value reaches the dynamic template string argument. Write final results to `sast/ssti-results.md`.
+**Batching procedure** (you, the orchestrator, do this — not a subagent):
+
+1. Read `sast/ssti-recon.md` and count the numbered candidate sections under "Candidate Rendering Sites" (`### 1.`, `### 2.`, etc.).
+2. Divide them into batches of up to 3. For example, 8 candidates → 3 batches (1-3, 4-6, 7-8).
+3. For each batch, extract the full text of those candidate sections from the recon file.
+4. Launch all batch subagents **in parallel**, passing each one only its assigned candidates.
+5. Each subagent writes to `sast/ssti-batch-N.md` where N is the 1-based batch number.
+6. Identify the project's primary language/framework from `sast/architecture.md` and select **only the matching examples** from the "Vulnerable vs. Secure Examples" section above. For example, if the project uses Python/Flask with Jinja2, include only the "Python — Flask / Jinja2" examples. Include these selected examples in each subagent's instructions where indicated by `[TECH-STACK EXAMPLES]` below.
+
+Give each batch subagent the following instructions (substitute the batch-specific values):
+
+> **Goal**: For each assigned candidate rendering site, determine whether a user-supplied value reaches the dynamic template string argument. Our goal is to find SSTI vulnerabilities.Write results to `sast/ssti-batch-[N].md`.
 >
-> **Context**: You will be given the project's architecture summary and the Phase 1 recon output. Use the architecture to understand request entry points, middleware, and how data flows through the application.
+> **Your assigned candidates** (from the recon phase):
 >
-> **For each rendering site, trace the dynamic template argument backwards to its origin**:
+> [Paste the full text of the assigned candidate sections here, preserving the original numbering]
+>
+> **Context**: You will be given the project's architecture summary. Use it to understand request entry points, middleware, and how data flows through the application.
+>
+> **SSTI reference — what to trace**:
+>
+> For each rendering site, trace the **dynamic template argument** backwards to its origin.
 >
 > 1. **Direct user input** — the argument is assigned directly from a request source with no transformation:
 >    - HTTP query params: `request.GET.get(...)`, `req.query.x`, `params[:x]`, `$_GET['x']`, `c.Query("x")`
@@ -468,15 +485,19 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 >
 > 4. **Server-side / hardcoded value** — the template string comes from a file loaded at startup, a hardcoded constant, or server-side logic with no user influence — this site is NOT exploitable.
 >
-> **For each rendering site, also assess the template engine's risk level**:
+> **Template engine risk level**:
 > - **Critical**: Jinja2, Mako, Twig, Smarty, FreeMarker, Velocity, ERB, Pug, EJS, Go `text/template`, Thymeleaf — full code execution possible
 > - **High**: Handlebars (with prototype pollution gadgets), Nunjucks, Lodash `_.template`, Blade, Razor
 > - **Medium / Logic-less**: Mustache, Liquid (without dangerous tags enabled) — arbitrary code execution not typically possible, but still check for data leakage
 >
-> **For each rendering site, also check for mitigations**:
+> **Mitigations to check**:
 > - Is the template engine running in a sandboxed mode? (e.g., Jinja2 `SandboxedEnvironment`, Twig `sandbox` extension with strict policy)
 > - Is the input validated or filtered before being used as a template? Note: blocklist-based filtering of template syntax characters (`{`, `}`, `%`) is **not** a reliable mitigation — attackers can often bypass it.
 > - Is the result of rendering passed directly to the response, or is it used in a non-dangerous context?
+>
+> **Vulnerable vs. secure examples for this project's tech stack**:
+>
+> [TECH-STACK EXAMPLES]
 >
 > **Classification**:
 > - **Vulnerable**: User input demonstrably reaches the template string argument with no effective mitigation, using a critical/high-risk engine.
@@ -484,17 +505,10 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **Not Vulnerable**: The template string is server-side only (file, constant, hardcoded), OR a properly configured sandbox is confirmed in place.
 > - **Needs Manual Review**: Cannot determine the argument's origin with confidence, or a logic-less engine is used and data leakage scope is unclear.
 >
-> **Output format** — write to `sast/ssti-results.md`:
+> **Output format** — write to `sast/ssti-batch-[N].md`:
 >
 > ```markdown
-> # SSTI Analysis Results: [Project Name]
->
-> ## Executive Summary
-> - Rendering sites analyzed: [N]
-> - Vulnerable: [N]
-> - Likely Vulnerable: [N]
-> - Not Vulnerable: [N]
-> - Needs Manual Review: [N]
+> # SSTI Batch [N] Results
 >
 > ## Findings
 >
@@ -541,17 +555,52 @@ Launch a second subagent **after Phase 1 completes** with the following instruct
 > - **Suggestion**: [What to trace manually — e.g., "Follow `get_custom_template()` in services/email.py to check where its return value originates"]
 > ```
 
+### Phase 3: Merge — Consolidate Batch Results
+
+After **all** Phase 2 batch subagents complete, read every `sast/ssti-batch-*.md` file and merge them into a single `sast/ssti-results.md`. You (the orchestrator) do this directly — no subagent needed.
+
+**Merge procedure**:
+
+1. Read all `sast/ssti-batch-1.md`, `sast/ssti-batch-2.md`, ... files.
+2. Collect all findings from each batch file and combine them into one list, preserving the original classification and all detail fields.
+3. Count totals across all batches for the executive summary.
+4. Write the merged report to `sast/ssti-results.md` using this format:
+
+```markdown
+# SSTI Analysis Results: [Project Name]
+
+## Executive Summary
+- Rendering sites analyzed: [total across all batches]
+- Vulnerable: [N]
+- Likely Vulnerable: [N]
+- Not Vulnerable: [N]
+- Needs Manual Review: [N]
+
+## Findings
+
+[All findings from all batches, grouped by classification:
+ VULNERABLE first, then LIKELY VULNERABLE, then NEEDS MANUAL REVIEW, then NOT VULNERABLE.
+ Preserve every field from the batch results exactly as written.]
+```
+
+5. After writing `sast/ssti-results.md`, **delete all intermediate batch files** (`sast/ssti-batch-*.md`).
+
 ---
 
 ## Important Reminders
 
-- Read `sast/architecture.md` and pass its content to both subagents as context.
+- Read `sast/architecture.md` and pass its content to all subagents as context.
 - Phase 2 must run AFTER Phase 1 completes — it depends on the recon output.
+- Phase 3 must run AFTER all Phase 2 batches complete — it depends on all batch outputs.
+- Batch size is **3 candidates per subagent**. If there are 1-3 candidates total, use a single subagent. If there are 10, use 4 subagents (3+3+3+1).
+- Launch all batch subagents **in parallel** — do not run them sequentially.
+- Each batch subagent receives only its assigned candidates' text from the recon file, not the entire recon file. This keeps each subagent's context small and focused.
 - **Phase 1 is purely structural**: flag any dynamic (non-literal) variable used as the template string argument. Do not attempt to trace user input in Phase 1 — that is Phase 2's job.
-- **Phase 2 is purely taint analysis**: for each site found in Phase 1, trace the dynamic template argument back to its origin. If it comes from a user-controlled source, the site is a real vulnerability.
+- **Phase 2 is purely taint analysis**: for each site assigned to a batch, trace the dynamic template argument back to its origin. If it comes from a user-controlled source, the site is a real vulnerability.
 - The critical distinction is **template string vs. template context**: user input passed as a *variable name/value* inside `render_template("page.html", user=input)` is safe. User input passed as the *template string itself* to `render_template_string(input)` is dangerous.
 - **Second-order SSTI is easy to miss**: a "custom template" feature may let users store Jinja2/Twig syntax in the database. When that stored template is later loaded and rendered server-side without sandboxing, it's SSTI. In Phase 2, treat DB-read template strings as potentially tainted.
 - **Thymeleaf fragment expressions**: in Spring Boot, if a controller returns a view name constructed from user input (e.g., `return "user/" + lang + "/view"`), Thymeleaf may process Spring EL expressions embedded in the path segment, enabling RCE. Flag any controller that builds a view name string using user-supplied values.
 - **Blocklist filtering is not a mitigation**: attempts to strip `{{`, `}}`, `<%`, `%>` etc. from user input are routinely bypassed via encoding, alternate syntax, or nested expressions. Do not classify a finding as "Not Vulnerable" solely because filtering is present.
 - When in doubt, classify as "Needs Manual Review" rather than "Not Vulnerable". False negatives are worse than false positives in security assessment.
 - Include engine-appropriate proof-of-concept payloads for all Vulnerable and Likely Vulnerable findings. Payloads should first test with a math expression (e.g., `{{7*7}}`) to confirm template execution before escalating to RCE payloads.
+- Clean up intermediate files: delete `sast/ssti-recon.md` and all `sast/ssti-batch-*.md` files after the final `sast/ssti-results.md` is written.

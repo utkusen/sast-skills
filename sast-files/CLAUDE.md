@@ -39,17 +39,17 @@ Start **one subagent per check**, all **in parallel**, each with a dedicated tas
 | Skill | Results file | Typical intermediate files to clean |
 |-------|----------------|--------------------------------------|
 | sast-idor | `sast/idor-results.md` | `sast/idor-recon.md` |
-| sast-sqli | `sast/sqli-results.md` | `sast/sqli-recon.md` |
+| sast-sqli | `sast/sqli-results.md` | `sast/sqli-recon.md`, `sast/sqli-batch-*.md` |
 | sast-ssrf | `sast/ssrf-results.md` | `sast/ssrf-recon.md` |
 | sast-xss | `sast/xss-results.md` | `sast/xss-recon.md` |
-| sast-rce | `sast/rce-results.md` | `sast/rce-recon.md` |
+| sast-rce | `sast/rce-results.md` | `sast/rce-recon.md`, `sast/rce-batch-*.md` |
 | sast-xxe | `sast/xxe-results.md` | `sast/xxe-recon.md` |
-| sast-fileupload | `sast/fileupload-results.md` | `sast/fileupload-recon.md` |
-| sast-pathtraversal | `sast/pathtraversal-results.md` | `sast/pathtraversal-recon.md` |
+| sast-fileupload | `sast/fileupload-results.md` | `sast/fileupload-recon.md`, `sast/fileupload-batch-*.md` |
+| sast-pathtraversal | `sast/pathtraversal-results.md` | `sast/pathtraversal-recon.md`, `sast/pathtraversal-batch-*.md` |
 | sast-ssti | `sast/ssti-results.md` | `sast/ssti-recon.md` |
 | sast-jwt | `sast/jwt-results.md` | `sast/jwt-recon.md` |
-| sast-missingauth | `sast/missingauth-results.md` | `sast/missingauth-recon.md` |
-| sast-businesslogic | `sast/businesslogic-results.md` | `sast/businesslogic-threats.md` |
+| sast-missingauth | `sast/missingauth-results.md` | `sast/missingauth-recon.md`, `sast/missingauth-batch-*.md` |
+| sast-businesslogic | `sast/businesslogic-results.md` | `sast/businesslogic-threats.md`, `sast/businesslogic-batch-*.md` |
 | sast-graphql | `sast/graphql-results.md` | `sast/graphql-recon.md` |
 
 Wait for all subagents to finish before proceeding.

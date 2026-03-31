@@ -1,19 +1,19 @@
 ---
 name: sast-graphql
 description: >-
-  Detect GraphQL injection vulnerabilities in a codebase using a two-phase
-  approach: first confirm GraphQL is in use and find sites where operation
-  documents are built unsafely (concatenation, interpolation into query
-  strings), then trace whether user input reaches those sites. Requires
-  sast/architecture.md (run sast-analysis first). Outputs findings to
-  sast/graphql-results.md. If no GraphQL technology is found in Phase 1, Phase
-  2 is skipped. Use when asked to find GraphQL injection, unsafe GraphQL
-  document construction, or operation string injection bugs.
+  Detect GraphQL injection vulnerabilities in a codebase using a three-phase
+  approach: recon (confirm GraphQL usage and find unsafe operation document
+  assembly sites), batched verify (trace user input to those sites in parallel
+  subagents, up to 3 candidate sites each), and merge (consolidate batch
+  results). Requires sast/architecture.md (run sast-analysis first). Outputs
+  findings to sast/graphql-results.md. If no GraphQL technology is found in
+  Phase 1, later phases are skipped. Use when asked to find GraphQL injection,
+  unsafe GraphQL document construction, or operation string injection bugs.
 ---
 
 # GraphQL Injection Detection
 
-You are performing a focused security assessment to find GraphQL injection vulnerabilities. This skill uses a two-phase approach with subagents: **recon** (confirm GraphQL usage and find every location where a GraphQL operation document is assembled unsafely) then **taint** (confirm whether user-supplied input reaches those assembly sites).
+You are performing a focused security assessment to find GraphQL injection vulnerabilities. This skill uses a three-phase approach with subagents: **recon** (confirm GraphQL usage and find every location where a GraphQL operation document is assembled unsafely), **batched verify** (trace whether user-supplied input reaches those assembly sites, in parallel batches of up to 3 sites each), and **merge** (consolidate batch results into the final report).
 
 **Prerequisites**: `sast/architecture.md` must exist. Run the analysis skill first if it doesn't.
 
@@ -118,7 +118,7 @@ document = "query { user { " + " ".join(ALLOWED.intersection(set(requested_field
 
 ## Execution
 
-This skill runs in two phases using subagents. Pass the contents of `sast/architecture.md` to both subagents as context.
+This skill runs in three phases using subagents. Pass the contents of `sast/architecture.md` to all subagents as context.
 
 ### Phase 1: GraphQL Technology Recon and Injection Candidate Sites
 
@@ -201,7 +201,7 @@ After Phase 1 completes, read `sast/graphql-recon.md`.
 
 **Gate 1 — No GraphQL technology**
 
-If the summary states GraphQL is **not used** (or equivalent: no GraphQL libraries, no schema, no server — clear absence), **skip Phase 2 entirely**. Write the following to `sast/graphql-results.md` and stop:
+If the summary states GraphQL is **not used** (or equivalent: no GraphQL libraries, no schema, no server — clear absence), **skip Phases 2 and 3**. Write the following to `sast/graphql-results.md` and stop:
 
 ```markdown
 # GraphQL Injection Analysis Results
@@ -211,7 +211,7 @@ No GraphQL technology detected in this codebase.
 
 **Gate 2 — GraphQL used but no injection candidates**
 
-If GraphQL **is** used but there are **zero** injection candidate sites (summary reports 0 candidates, or the "Injection Candidate Sites" section states none found / is empty), **skip Phase 2 entirely**. Write the following to `sast/graphql-results.md` and stop:
+If GraphQL **is** used but there are **zero** injection candidate sites (summary reports 0 candidates, or the "Injection Candidate Sites" section states none found / is empty), **skip Phases 2 and 3**. Write the following to `sast/graphql-results.md` and stop:
 
 ```markdown
 # GraphQL Injection Analysis Results
@@ -221,24 +221,54 @@ No vulnerabilities found.
 
 **Otherwise** proceed to Phase 2.
 
-### Phase 2: Trace User Input to Injection Candidate Sites
+### Phase 2: Trace User Input to Injection Candidate Sites (Batched)
 
-Launch a second subagent **after Phase 1 completes** and only if both gates passed (GraphQL used and at least one candidate site).
+After Phase 1 completes and both gates pass (GraphQL used and at least one candidate site), read `sast/graphql-recon.md` and split the **Injection Candidate Sites** into **batches of up to 3 sites each** (each `### N.` section is one site). Launch **one subagent per batch in parallel**. Each subagent traces taint only for its assigned sites and writes results to its own batch file.
 
-> **Goal**: For each injection candidate site in `sast/graphql-recon.md`, determine whether user-supplied data can reach the dynamic part of the operation document. Write final results to `sast/graphql-results.md`.
+**Batching procedure** (you, the orchestrator, do this — not a subagent):
+
+1. Read `sast/graphql-recon.md` and count the numbered candidate sections under "Injection Candidate Sites" (`### 1.`, `### 2.`, etc.).
+2. Divide them into batches of up to 3. For example, 8 sites → 3 batches (1-3, 4-6, 7-8).
+3. For each batch, extract the full text of those candidate sections from the recon file.
+4. Launch all batch subagents **in parallel**, passing each one only its assigned candidate sections (plus architecture context).
+5. Each subagent writes to `sast/graphql-batch-N.md` where N is the 1-based batch number.
+6. Identify the project's primary language/framework from `sast/architecture.md` and select **only the matching examples** from the "Vulnerable vs. Secure Examples" section above. For example, if the project uses Node.js, include the "Node.js — dynamic document for downstream API" example; if Python, include "Python — string format into execute". Include these selected examples in each subagent's instructions where indicated by `[TECH-STACK EXAMPLES]` below.
+
+Give each batch subagent the following instructions (substitute the batch-specific values):
+
+> **Goal**: For each assigned injection candidate site, determine whether user-supplied data can reach the dynamic part of the operation document. Our goal is to find GraphQL injection vulnerabilities. Write results to `sast/graphql-batch-[N].md`.
 >
-> **Context**: You will be given `sast/architecture.md` and `sast/graphql-recon.md`.
+> **Your assigned candidate sites** (from the recon phase):
 >
-> **For each site, trace dynamic values backward**:
+> [Paste the full text of the assigned candidate sections here, preserving the original numbering]
+>
+> **Context**: You will be given the project's architecture summary. Use it for API layout, request handling, and BFF/gateway patterns.
+>
+> **GraphQL injection reference — What to look for**:
+>
+> User-controlled data must not alter the **GraphQL document text** (query/mutation/subscription source) except through bound **variables** on a static document. Flag when taint reaches string assembly of the operation.
+>
+> **What GraphQL injection is NOT** — do not flag these here:
+> - **SQL/NoSQL injection in resolvers** — other SAST skills
+> - **IDOR with static document + variables** — authorization, not document injection
+> - **Normal variable binding** on a fixed document string
+> - **Introspection enabled** — unless the finding is specifically operation-string injection
+> - **Query depth/complexity DoS** — different class
+>
+> **Mitigations that reduce risk**:
+> - Allowlist of fields or operation IDs before any string assembly
+> - Parser validation that rejects unexpected definitions (still prefer no user-controlled document structure)
+>
+> **Vulnerable vs. secure examples for this project's tech stack**:
+>
+> [TECH-STACK EXAMPLES]
+>
+> **For each assigned site, trace dynamic values backward**:
 >
 > 1. **Direct user input** — query params, path params, JSON body fields (including nested `query` if re-wrapped), headers, cookies
 > 2. **Indirect user input** — helpers, middleware, context builders
 > 3. **Second-order** — stored preferences or DB fields later used to build a document; trace write path
 > 4. **Server-only** — config, env, hardcoded fragments — not exploitable from the client
->
-> **Mitigations**:
-> - Allowlist of fields or operation IDs before any string assembly
-> - Parser validation that rejects unexpected definitions (still prefer no user-controlled document structure)
 >
 > **Classification**:
 > - **Vulnerable**: User-controlled data reaches document construction with no effective mitigation
@@ -246,17 +276,10 @@ Launch a second subagent **after Phase 1 completes** and only if both gates pass
 > - **Not Vulnerable**: Server-side-only or effective allowlist / static document path
 > - **Needs Manual Review**: Opaque flow
 >
-> **Output format** — write to `sast/graphql-results.md`:
+> **Output format** — write to `sast/graphql-batch-[N].md`:
 >
 > ```markdown
-> # GraphQL Injection Analysis Results: [Project Name]
->
-> ## Executive Summary
-> - Candidate sites analyzed: [N]
-> - Vulnerable: [N]
-> - Likely Vulnerable: [N]
-> - Not Vulnerable: [N]
-> - Needs Manual Review: [N]
+> # GraphQL Batch [N] Results
 >
 > ## Findings
 >
@@ -296,13 +319,49 @@ Launch a second subagent **after Phase 1 completes** and only if both gates pass
 > - **Suggestion**: ...
 > ```
 
+### Phase 3: Merge — Consolidate Batch Results
+
+After **all** Phase 2 batch subagents complete, read every `sast/graphql-batch-*.md` file and merge them into a single `sast/graphql-results.md`. You (the orchestrator) do this directly — no subagent needed.
+
+**Merge procedure**:
+
+1. Read all `sast/graphql-batch-1.md`, `sast/graphql-batch-2.md`, ... files.
+2. Collect all findings from each batch file and combine them into one list, preserving the original classification and all detail fields.
+3. Count totals across all batches for the executive summary.
+4. Write the merged report to `sast/graphql-results.md` using this format:
+
+```markdown
+# GraphQL Injection Analysis Results: [Project Name]
+
+## Executive Summary
+- Candidate sites analyzed: [total across all batches]
+- Vulnerable: [N]
+- Likely Vulnerable: [N]
+- Not Vulnerable: [N]
+- Needs Manual Review: [N]
+
+## Findings
+
+[All findings from all batches, grouped by classification:
+ VULNERABLE first, then LIKELY VULNERABLE, then NEEDS MANUAL REVIEW, then NOT VULNERABLE.
+ Preserve every field from the batch results exactly as written.]
+```
+
+5. After writing `sast/graphql-results.md`, **delete all intermediate batch files** (`sast/graphql-batch-*.md`).
+
 ---
 
 ## Important Reminders
 
-- Read `sast/architecture.md` and pass its content to both subagents as context.
-- **If Phase 1 finds no GraphQL technology, skip Phase 2** — write the "No GraphQL technology detected" results file.
-- **If GraphQL is used but Phase 1 finds no injection candidates, skip Phase 2** — write "No vulnerabilities found."
+- Read `sast/architecture.md` and pass its content to all subagents as context.
+- **If Phase 1 finds no GraphQL technology, skip Phases 2 and 3** — write the "No GraphQL technology detected" results file.
+- **If GraphQL is used but Phase 1 finds no injection candidates, skip Phases 2 and 3** — write "No vulnerabilities found."
+- Phase 2 must run **after** Phase 1 completes — it depends on the recon output.
+- Phase 3 must run **after** all Phase 2 batches complete — it depends on all batch outputs.
+- Batch size is **3 candidate sites per subagent**. If there are 1-3 sites total, use a single subagent. If there are 10, use 4 subagents (3+3+3+1).
+- Launch all batch subagents **in parallel** — do not run them sequentially.
+- Each batch subagent receives only its assigned candidates' text from the recon file, not the entire recon file. This keeps each subagent's context small and focused.
 - Phase 1 does **not** trace taint; Phase 2 does.
 - Resolver-layer SQL/NoSQL issues belong to other skills; this skill targets **operation document** construction.
 - When in doubt, classify as "Needs Manual Review" rather than "Not Vulnerable".
+- Clean up intermediate files: delete `sast/graphql-recon.md` and all `sast/graphql-batch-*.md` files after the final `sast/graphql-results.md` is written.
