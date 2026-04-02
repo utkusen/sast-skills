@@ -31,6 +31,7 @@ Run all checks at the same time. Skip any task where the output file already exi
 - Skip Missing Auth if `sast/missingauth-results.md` already exists.
 - Skip Business Logic if `sast/businesslogic-results.md` already exists.
 - Skip GraphQL injection if `sast/graphql-results.md` already exists.
+- Skip Hardcoded Secrets if `sast/hardcodedsecrets-results.md` already exists.
 
 Start **one subagent per check**, all **in parallel**, each with a dedicated task. Give each subagent the same instruction pattern, using the skill name and paths from the table:
 
@@ -51,6 +52,7 @@ Start **one subagent per check**, all **in parallel**, each with a dedicated tas
 | sast-missingauth | `sast/missingauth-results.md` | `sast/missingauth-recon.md`, `sast/missingauth-batch-*.md` |
 | sast-businesslogic | `sast/businesslogic-results.md` | `sast/businesslogic-threats.md`, `sast/businesslogic-batch-*.md` |
 | sast-graphql | `sast/graphql-results.md` | `sast/graphql-recon.md` |
+| sast-hardcodedsecrets | `sast/hardcodedsecrets-results.md` | `sast/hardcodedsecrets-recon.md`, `sast/hardcodedsecrets-batch-*.md` |
 
 Wait for all subagents to finish before proceeding.
 
