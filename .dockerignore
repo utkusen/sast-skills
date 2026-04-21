@@ -1,0 +1,8 @@
+node_modules
+test
+.git
+.github
+.claude
+demo.gif
+*.tgz
+.DS_Store

@@ -6,6 +6,7 @@ description: >-
   flows, and trust boundaries. Outputs sast/architecture.md. Run this before any
   vulnerability detection skill. Use when asked to analyze a codebase for
   security or when sast/architecture.md does not yet exist.
+version: 0.1.0
 ---
 
 # Codebase Analysis

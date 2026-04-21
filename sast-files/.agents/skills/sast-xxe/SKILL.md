@@ -7,6 +7,7 @@ description: >-
   subagents, 3 sites each), and merge (consolidate batch results). Requires
   sast/architecture.md (run sast-analysis first). Outputs findings to
   sast/xxe-results.md. Use when asked to find XXE or XML injection bugs.
+version: 0.1.0
 ---
 
 # XML External Entity (XXE) Detection

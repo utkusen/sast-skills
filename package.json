@@ -1,0 +1,56 @@
+{
+  "name": "sast-skills",
+  "version": "0.1.0",
+  "description": "LLM SAST skills — turn your AI coding assistant into a SAST scanner for your codebase.",
+  "type": "module",
+  "bin": {
+    "sast-skills": "bin/sast-skills.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "sast-files/CLAUDE.md",
+    "sast-files/AGENTS.md",
+    "sast-files/.claude/skills",
+    "sast-files/.agents/skills"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "sast",
+    "security",
+    "vulnerability",
+    "scanner",
+    "claude",
+    "claude-code",
+    "agent-skills",
+    "llm"
+  ],
+  "author": "Mustafa Kaan Demirhan",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mstfknn/sast-skills.git"
+  },
+  "homepage": "https://github.com/mstfknn/sast-skills#readme",
+  "bugs": {
+    "url": "https://github.com/mstfknn/sast-skills/issues"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "sync": "node scripts/sync-skills.js sast-files/.claude/skills sast-files/.agents/skills",
+    "new-skill": "node scripts/scaffold-skill.js",
+    "lint:md": "markdownlint-cli2",
+    "prepublishOnly": "npm run sync && npm test"
+  },
+  "dependencies": {
+    "@clack/prompts": "^0.7.0"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "^0.22.0",
+    "tdd-guard-vitest": "^0.2.0",
+    "vitest": "^4.1.0"
+  }
+}

@@ -1,0 +1,58 @@
+name: Skill proposal
+description: Propose a new vulnerability detection skill (sast-<name>) to add to the shipped set.
+title: "[skill] sast-<name>: "
+labels: [skill, enhancement, triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this to propose adding a new vulnerability class. The maintainers will decide whether it fits the current set; if yes, the project tooling automates scaffolding (see [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md)).
+  - type: input
+    id: name
+    attributes:
+      label: Proposed skill name
+      description: Short lowercase, dashes if needed. Must start with `sast-`.
+      placeholder: sast-ratelimit
+    validations:
+      required: true
+  - type: input
+    id: class
+    attributes:
+      label: Vulnerability class
+      description: One-line summary of what this detects.
+      placeholder: Missing or bypassable rate limiting on sensitive endpoints
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Representative examples
+      description: 2-4 concrete code patterns the skill should flag, across common stacks.
+    validations:
+      required: true
+  - type: textarea
+    id: not_examples
+    attributes:
+      label: "What it is NOT"
+      description: Patterns that *look* like this but belong to another skill. Helps us draw the boundary cleanly.
+    validations:
+      required: true
+  - type: textarea
+    id: mitigations
+    attributes:
+      label: Preventive patterns
+      description: What should a safe codebase look like? Libraries, framework defaults, architectural choices.
+    validations:
+      required: true
+  - type: textarea
+    id: existing
+    attributes:
+      label: Overlap with existing skills
+      description: "Which shipped skill is the closest pattern match? (e.g. sast-sqli, sast-missingauth, sast-rce). We use this to pick a reference template for the SKILL.md body."
+    validations:
+      required: true
+  - type: textarea
+    id: severity
+    attributes:
+      label: Severity rubric
+      description: When is this critical / high / medium / low?

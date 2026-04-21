@@ -31,6 +31,21 @@ Run all checks at the same time. Skip any task where the output file already exi
 - Skip Missing Auth if `sast/missingauth-results.md` already exists.
 - Skip Business Logic if `sast/businesslogic-results.md` already exists.
 - Skip GraphQL injection if `sast/graphql-results.md` already exists.
+- Skip Hardcoded Secrets if `sast/hardcodedsecrets-results.md` already exists.
+- Skip CSRF if `sast/csrf-results.md` already exists.
+- Skip Open Redirect if `sast/openredirect-results.md` already exists.
+- Skip CORS if `sast/cors-results.md` already exists.
+- Skip LDAP if `sast/ldap-results.md` already exists.
+- Skip NoSQL if `sast/nosql-results.md` already exists.
+- Skip Prototype Pollution if `sast/prototype-results.md` already exists.
+- Skip ReDoS if `sast/redos-results.md` already exists.
+- Skip Crypto if `sast/crypto-results.md` already exists.
+- Skip Race Condition if `sast/race-results.md` already exists.
+- Skip PII Logging if `sast/pii-results.md` already exists.
+- Skip Vulnerable Dependencies if `sast/deps-results.md` already exists.
+- Skip IaC if `sast/iac-results.md` already exists.
+- Skip Prompt Injection if `sast/promptinjection-results.md` already exists.
+- Skip LLM Output if `sast/llmoutput-results.md` already exists.
 
 Start **one subagent per check**, all **in parallel**, each with a dedicated task. Give each subagent the same instruction pattern, using the skill name and paths from the table:
 
@@ -51,8 +66,47 @@ Start **one subagent per check**, all **in parallel**, each with a dedicated tas
 | sast-missingauth | `sast/missingauth-results.md` | `sast/missingauth-recon.md`, `sast/missingauth-batch-*.md` |
 | sast-businesslogic | `sast/businesslogic-results.md` | `sast/businesslogic-threats.md`, `sast/businesslogic-batch-*.md` |
 | sast-graphql | `sast/graphql-results.md` | `sast/graphql-recon.md` |
+| sast-hardcodedsecrets | `sast/hardcodedsecrets-results.md` | `sast/hardcodedsecrets-recon.md`, `sast/hardcodedsecrets-batch-*.md` |
+| sast-csrf | `sast/csrf-results.md` | `sast/csrf-recon.md`, `sast/csrf-batch-*.md` |
+| sast-openredirect | `sast/openredirect-results.md` | `sast/openredirect-recon.md`, `sast/openredirect-batch-*.md` |
+| sast-cors | `sast/cors-results.md` | `sast/cors-recon.md`, `sast/cors-batch-*.md` |
+| sast-ldap | `sast/ldap-results.md` | `sast/ldap-recon.md`, `sast/ldap-batch-*.md` |
+| sast-nosql | `sast/nosql-results.md` | `sast/nosql-recon.md`, `sast/nosql-batch-*.md` |
+| sast-prototype | `sast/prototype-results.md` | `sast/prototype-recon.md`, `sast/prototype-batch-*.md` |
+| sast-redos | `sast/redos-results.md` | `sast/redos-recon.md`, `sast/redos-batch-*.md` |
+| sast-crypto | `sast/crypto-results.md` | `sast/crypto-recon.md`, `sast/crypto-batch-*.md` |
+| sast-race | `sast/race-results.md` | `sast/race-recon.md`, `sast/race-batch-*.md` |
+| sast-pii | `sast/pii-results.md` | `sast/pii-recon.md`, `sast/pii-batch-*.md` |
+| sast-deps | `sast/deps-results.md` | `sast/deps-recon.md`, `sast/deps-batch-*.md` |
+| sast-iac | `sast/iac-results.md` | `sast/iac-recon.md`, `sast/iac-batch-*.md` |
+| sast-promptinjection | `sast/promptinjection-results.md` | `sast/promptinjection-recon.md`, `sast/promptinjection-batch-*.md` |
+| sast-llmoutput | `sast/llmoutput-results.md` | `sast/llmoutput-recon.md`, `sast/llmoutput-batch-*.md` |
 
 Wait for all subagents to finish before proceeding.
+
+### Canonical JSON output
+
+In addition to the human-readable `sast/<skill>-results.md`, each subagent must also emit a machine-readable `sast/<skill>-results.json` file so the `sast-skills export` CLI can aggregate `sast/*-results.json` into SARIF, JSON, or HTML.
+
+Each JSON file must contain a single object with a `findings` array. Each finding follows this canonical schema:
+
+```json
+{
+  "findings": [
+    {
+      "id": "<skill>-<sequential-id>",
+      "skill": "<skill-name>",
+      "severity": "critical|high|medium|low|info",
+      "title": "short one-line description",
+      "description": "full explanation including exploitability",
+      "location": { "file": "relative/path.ext", "line": 123, "column": 10 },
+      "remediation": "how to fix"
+    }
+  ]
+}
+```
+
+If a skill produces no findings, still write the file with `"findings": []` so the aggregator can verify the scan ran.
 
 ---
 
@@ -65,3 +119,17 @@ Skip this step if `sast/final-report.md` already exists.
 Launch a single subagent:
 
 > Read all available `sast/*-results.md` files and `sast/architecture.md` for context, then run the sast-report skill to generate `sast/final-report.md` with all findings ranked by severity and confidentiality impact.
+
+---
+
+## Step 4: Triage
+
+After `sast/final-report.md` is generated, triage every finding to eliminate false positives and correct severities.
+
+Skip this step if `sast/final-report-triaged.md` already exists.
+
+Launch a single subagent that runs the sast-triage skill:
+
+> Read `sast/final-report.md`, all `sast/*-results.json`, and `sast/architecture.md`. Run the sast-triage skill. For each finding, decide if it is a true positive, a false positive, or needs a severity adjustment (up or down), with evidence from the codebase for every change. Write the final triaged report to `sast/final-report-triaged.md` and the machine-readable canonical view to `sast/triaged.json`. Do not modify the original `*-results.json` or `final-report.md` — the triaged files are additive so the raw output stays auditable.
+
+`sast-skills export --input sast/ --triaged` will prefer `sast/triaged.json` over `sast/*-results.json` when both are present.

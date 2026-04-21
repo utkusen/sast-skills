@@ -10,6 +10,7 @@ description: >-
   sast/architecture.md (run sast-analysis first). Outputs findings to
   sast/missingauth-results.md. Use when asked to find missing auth, broken
   access control, or privilege escalation bugs.
+version: 0.1.0
 ---
 
 # Missing Authentication & Broken Function-Level Authorization Detection

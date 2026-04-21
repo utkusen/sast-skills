@@ -9,6 +9,7 @@ description: >-
   findings to sast/graphql-results.md. If no GraphQL technology is found in
   Phase 1, later phases are skipped. Use when asked to find GraphQL injection,
   unsafe GraphQL document construction, or operation string injection bugs.
+version: 0.1.0
 ---
 
 # GraphQL Injection Detection

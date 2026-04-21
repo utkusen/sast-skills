@@ -7,6 +7,7 @@ description: >-
   merge (consolidate batch results). Requires sast/architecture.md (run
   sast-analysis first). Outputs findings to sast/xss-results.md. Use when asked
   to find XSS or cross-site scripting bugs.
+version: 0.1.0
 ---
 
 # Cross-Site Scripting (XSS) Detection

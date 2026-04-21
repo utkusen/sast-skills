@@ -8,6 +8,7 @@ description: >-
   on user-supplied identifiers. Requires sast/architecture.md (run sast-analysis
   first). Outputs findings to sast/idor-results.md. Use when asked to find IDOR
   or authorization bypass bugs.
+version: 0.1.0
 ---
 
 # IDOR (Insecure Direct Object Reference) Detection

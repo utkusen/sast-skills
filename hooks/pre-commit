@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# sast-skills pre-commit hook template.
+# Copy to .git/hooks/pre-commit and make executable.
+set -euo pipefail
+
+# Verify the installed skills match the bundled version. If this fails,
+# run `npx sast-skills update` and try again.
+npx sast-skills doctor --target "$(git rev-parse --show-toplevel)" --assistant claude

@@ -8,6 +8,7 @@ description: >-
   and unsafe deserialization. Requires sast/architecture.md (run sast-analysis
   first). Outputs findings to sast/rce-results.md. Use when asked to find RCE,
   command injection, or unsafe deserialization bugs.
+version: 0.1.0
 ---
 
 # Remote Code Execution (RCE) Detection

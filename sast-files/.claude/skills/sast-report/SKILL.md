@@ -6,6 +6,7 @@ description: >-
   *-results.md files and produces sast/final-report.md. Run after all
   vulnerability detection skills complete. Use when asked to generate a final
   report, consolidate findings, or summarize security results.
+version: 0.1.0
 ---
 
 # Final Security Report Generation

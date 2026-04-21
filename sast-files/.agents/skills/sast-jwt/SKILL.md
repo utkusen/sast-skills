@@ -10,6 +10,7 @@ description: >-
   Outputs findings to sast/jwt-results.md. If no JWT usage is found in Phase 1,
   Phase 2 is skipped. Use when asked to find JWT, token forgery, or
   authentication bypass bugs.
+version: 0.1.0
 ---
 
 # JWT Vulnerability Detection
