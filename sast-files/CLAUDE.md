@@ -32,6 +32,20 @@ Run all checks at the same time. Skip any task where the output file already exi
 - Skip Business Logic if `sast/businesslogic-results.md` already exists.
 - Skip GraphQL injection if `sast/graphql-results.md` already exists.
 - Skip Hardcoded Secrets if `sast/hardcodedsecrets-results.md` already exists.
+- Skip CSRF if `sast/csrf-results.md` already exists.
+- Skip Open Redirect if `sast/openredirect-results.md` already exists.
+- Skip CORS if `sast/cors-results.md` already exists.
+- Skip LDAP if `sast/ldap-results.md` already exists.
+- Skip NoSQL if `sast/nosql-results.md` already exists.
+- Skip Prototype Pollution if `sast/prototype-results.md` already exists.
+- Skip ReDoS if `sast/redos-results.md` already exists.
+- Skip Crypto if `sast/crypto-results.md` already exists.
+- Skip Race Condition if `sast/race-results.md` already exists.
+- Skip PII Logging if `sast/pii-results.md` already exists.
+- Skip Vulnerable Dependencies if `sast/deps-results.md` already exists.
+- Skip IaC if `sast/iac-results.md` already exists.
+- Skip Prompt Injection if `sast/promptinjection-results.md` already exists.
+- Skip LLM Output if `sast/llmoutput-results.md` already exists.
 
 Start **one subagent per check**, all **in parallel**, each with a dedicated task. Give each subagent the same instruction pattern, using the skill name and paths from the table:
 
@@ -53,6 +67,20 @@ Start **one subagent per check**, all **in parallel**, each with a dedicated tas
 | sast-businesslogic | `sast/businesslogic-results.md` | `sast/businesslogic-threats.md`, `sast/businesslogic-batch-*.md` |
 | sast-graphql | `sast/graphql-results.md` | `sast/graphql-recon.md` |
 | sast-hardcodedsecrets | `sast/hardcodedsecrets-results.md` | `sast/hardcodedsecrets-recon.md`, `sast/hardcodedsecrets-batch-*.md` |
+| sast-csrf | `sast/csrf-results.md` | `sast/csrf-recon.md`, `sast/csrf-batch-*.md` |
+| sast-openredirect | `sast/openredirect-results.md` | `sast/openredirect-recon.md`, `sast/openredirect-batch-*.md` |
+| sast-cors | `sast/cors-results.md` | `sast/cors-recon.md`, `sast/cors-batch-*.md` |
+| sast-ldap | `sast/ldap-results.md` | `sast/ldap-recon.md`, `sast/ldap-batch-*.md` |
+| sast-nosql | `sast/nosql-results.md` | `sast/nosql-recon.md`, `sast/nosql-batch-*.md` |
+| sast-prototype | `sast/prototype-results.md` | `sast/prototype-recon.md`, `sast/prototype-batch-*.md` |
+| sast-redos | `sast/redos-results.md` | `sast/redos-recon.md`, `sast/redos-batch-*.md` |
+| sast-crypto | `sast/crypto-results.md` | `sast/crypto-recon.md`, `sast/crypto-batch-*.md` |
+| sast-race | `sast/race-results.md` | `sast/race-recon.md`, `sast/race-batch-*.md` |
+| sast-pii | `sast/pii-results.md` | `sast/pii-recon.md`, `sast/pii-batch-*.md` |
+| sast-deps | `sast/deps-results.md` | `sast/deps-recon.md`, `sast/deps-batch-*.md` |
+| sast-iac | `sast/iac-results.md` | `sast/iac-recon.md`, `sast/iac-batch-*.md` |
+| sast-promptinjection | `sast/promptinjection-results.md` | `sast/promptinjection-recon.md`, `sast/promptinjection-batch-*.md` |
+| sast-llmoutput | `sast/llmoutput-results.md` | `sast/llmoutput-recon.md`, `sast/llmoutput-batch-*.md` |
 
 Wait for all subagents to finish before proceeding.
 

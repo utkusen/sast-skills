@@ -35,6 +35,20 @@ Claude Code with Opus model is recommended. But if the cost is a concern, use an
 | sast-fileupload | Insecure file upload |
 | sast-businesslogic | Business logic flaws (price manipulation, workflow bypass, race conditions, etc.) |
 | sast-hardcodedsecrets | Hardcoded API keys, tokens, and credentials in client-facing code |
+| sast-csrf | Cross-Site Request Forgery |
+| sast-openredirect | Open redirect (unvalidated redirect to attacker-controlled URL) |
+| sast-cors | CORS misconfiguration (permissive Access-Control-Allow-Origin/credentials) |
+| sast-ldap | LDAP injection |
+| sast-nosql | NoSQL injection (MongoDB/Firestore/Dynamo operator injection) |
+| sast-prototype | Prototype pollution in JavaScript/TypeScript |
+| sast-redos | Regex denial of service (catastrophic backtracking) |
+| sast-crypto | Insecure cryptography (weak hash, weak IV, weak PRNG, deprecated cipher) |
+| sast-race | Race conditions and TOCTOU bugs |
+| sast-pii | PII and credential leakage to logs or error messages |
+| sast-deps | Known-vulnerable dependencies (CVEs in package.json/requirements/go.mod) |
+| sast-iac | Insecure IaC (Dockerfile/Terraform/Kubernetes manifests) |
+| sast-promptinjection | LLM prompt injection (untrusted text reaching a model) |
+| sast-llmoutput | Insecure handling of LLM output (command/SQL/HTML injection from model response) |
 | sast-report | Consolidated final report ranked by severity |
 | sast-triage | False-positive elimination and severity adjustment over the consolidated report |
 

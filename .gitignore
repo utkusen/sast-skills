@@ -1,4 +1,38 @@
+# macOS / Windows junk
 .DS_Store
-/.claude
-/node_modules
+Thumbs.db
+Desktop.ini
+
+# Node
+node_modules/
+*.tgz
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Env / secrets — KRITIK for a public repo
+.env
+.env.*
+!.env.example
+
+# Editor / IDE caches
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test & tooling caches
+coverage/
+.nyc_output/
+*.lcov
+.vite/
+.vitest-cache/
+.cache/
+
+# TDD Guard local state (per-machine, ephemeral)
+/.claude/
+
+# SAST output (produced when this repo scans itself or a user's project)
 sast/
