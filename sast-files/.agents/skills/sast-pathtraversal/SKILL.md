@@ -8,6 +8,7 @@ description: >-
   sast-analysis first). Outputs findings to sast/pathtraversal-results.md. Use
   when asked to find path traversal, directory traversal, or file disclosure
   bugs.
+version: 0.1.0
 ---
 
 # Path Traversal Detection

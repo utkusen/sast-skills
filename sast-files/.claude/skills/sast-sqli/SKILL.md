@@ -8,6 +8,7 @@ description: >-
   identifiers. Requires sast/architecture.md (run sast-analysis first). Outputs
   findings to sast/sqli-results.md. Use when asked to find SQLi or database
   injection bugs.
+version: 0.1.0
 ---
 
 # SQL Injection (SQLi) Detection

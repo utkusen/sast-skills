@@ -11,8 +11,19 @@ const packageRoot = resolve(here, '..');
 if (command === '--version') {
   const pkg = JSON.parse(await readFile(resolve(packageRoot, 'package.json'), 'utf8'));
   console.log(pkg.version);
-} else if (command === undefined) {
-  console.log('Usage: sast-skills <command>\n\nCommands:\n  install    Install SAST skills');
+} else if (command === undefined || command === '--help' || command === '-h') {
+  console.log([
+    'Usage: sast-skills <command>',
+    '',
+    'Commands:',
+    '  install      Install SAST skills',
+    '  update       Refresh an existing install with the bundled skill files',
+    '  uninstall    Remove installed SAST skills',
+    '  doctor       Verify an install against the bundled files',
+    '',
+    'Flags:',
+    '  --version    Print the installed version',
+  ].join('\n'));
 } else if (command === 'install' || command === 'uninstall' || command === 'update' || command === 'doctor') {
   await run({
     argv: [command, ...rest],

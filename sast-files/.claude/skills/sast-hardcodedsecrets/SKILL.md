@@ -9,6 +9,7 @@ description: >-
   Requires sast/architecture.md (run sast-analysis first). Outputs findings to
   sast/hardcodedsecrets-results.md. Use when asked to find hardcoded secrets,
   leaked API keys, or exposed credentials.
+version: 0.1.0
 ---
 
 # Hardcoded Secrets in Public Code Detection

@@ -39,18 +39,34 @@ Claude Code with Opus model is recommended. But if the cost is a concern, use an
 
 ## Installation
 
-Copy your project into the `sast-files` folder, then open `sast-files` as your workspace in your AI coding assistant.
+Run the installer from your project root:
 
 ```bash
-cp -r /path/to/your/project sast-files/
+npx sast-skills install
 ```
 
-> **Note:** If your project already contains a `CLAUDE.md` or `AGENTS.md` file, remove it before running the assessment — otherwise it will conflict with the orchestration file provided by this toolkit.
+The installer asks which assistant to target (`claude`, `agents`, or `all`) and whether to install into the current project or into your user home directory (global). To skip the prompts, pass flags:
+
+```bash
+npx sast-skills install --yes --assistant claude --scope project
+```
+
+Other commands:
+
+| Command | What it does |
+|---|---|
+| `npx sast-skills install` | Copy CLAUDE.md/AGENTS.md and the skill files into your project |
+| `npx sast-skills update` | Refresh an existing install with the currently bundled skill files |
+| `npx sast-skills uninstall` | Remove installed skills (refuses to clobber a modified CLAUDE.md without `--force`) |
+| `npx sast-skills doctor` | Verify an install and report `OK` / `MISSING` / `MODIFIED` for each file |
+| `npx sast-skills --version` | Print the installed version |
+
+> **Note:** If your project already contains a `CLAUDE.md` or `AGENTS.md` file, either pass `--force` to overwrite it or back it up first — the installer will refuse to clobber it by default.
 
 
 ## Usage
 
-After copying the files, open your project in your AI coding assistant and ask:
+After installing, open your project in your AI coding assistant and ask:
 
 > Run vulnerability scan
 

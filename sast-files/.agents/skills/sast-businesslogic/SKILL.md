@@ -9,6 +9,7 @@ description: >-
   sast/architecture.md (run sast-analysis first). Outputs findings to
   sast/businesslogic-results.md. Use when asked to find business logic, logic
   flaws, or abuse-of-function bugs.
+version: 0.1.0
 ---
 
 # Business Logic Vulnerability Detection

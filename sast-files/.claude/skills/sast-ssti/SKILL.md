@@ -7,6 +7,7 @@ description: >-
   subagents, 3 candidates each), and merge (consolidate batch results). Requires
   sast/architecture.md (run sast-analysis first). Outputs findings to
   sast/ssti-results.md. Use when asked to find SSTI or template injection bugs.
+version: 0.1.0
 ---
 
 # Server-Side Template Injection (SSTI) Detection

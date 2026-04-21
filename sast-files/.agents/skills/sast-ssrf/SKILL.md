@@ -7,6 +7,7 @@ description: >-
   (consolidate batch results). Requires sast/architecture.md (run sast-analysis
   first). Outputs findings to sast/ssrf-results.md. Use when asked to find SSRF
   or server-side request forgery bugs.
+version: 0.1.0
 ---
 
 # Server-Side Request Forgery (SSRF) Detection

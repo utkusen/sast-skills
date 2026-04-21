@@ -7,6 +7,7 @@ description: >-
   (consolidate batch results). Requires sast/architecture.md (run sast-analysis
   first). Outputs findings to sast/fileupload-results.md. Use when asked to find
   file upload, unrestricted upload, or extension bypass bugs.
+version: 0.1.0
 ---
 
 # Insecure File Upload Detection
