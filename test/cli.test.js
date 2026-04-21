@@ -43,6 +43,7 @@ test('usage lists every user-facing command', async () => {
   expect(stdout).toMatch(/\bupdate\b/);
   expect(stdout).toMatch(/\buninstall\b/);
   expect(stdout).toMatch(/\bdoctor\b/);
+  expect(stdout).toMatch(/\bexport\b/);
 });
 
 test('--help and -h print the same usage and exit 0', async () => {

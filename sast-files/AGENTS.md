@@ -56,6 +56,30 @@ Start **one subagent per check**, all **in parallel**, each with a dedicated tas
 
 Wait for all subagents to finish before proceeding.
 
+### Canonical JSON output
+
+In addition to the human-readable `sast/<skill>-results.md`, each subagent must also emit a machine-readable `sast/<skill>-results.json` file so the `sast-skills export` CLI can aggregate `sast/*-results.json` into SARIF, JSON, or HTML.
+
+Each JSON file must contain a single object with a `findings` array. Each finding follows this canonical schema:
+
+```json
+{
+  "findings": [
+    {
+      "id": "<skill>-<sequential-id>",
+      "skill": "<skill-name>",
+      "severity": "critical|high|medium|low|info",
+      "title": "short one-line description",
+      "description": "full explanation including exploitability",
+      "location": { "file": "relative/path.ext", "line": 123, "column": 10 },
+      "remediation": "how to fix"
+    }
+  ]
+}
+```
+
+If a skill produces no findings, still write the file with `"findings": []` so the aggregator can verify the scan ran.
+
 ---
 
 ## Step 3: Report Generation
@@ -67,3 +91,17 @@ Skip this step if `sast/final-report.md` already exists.
 Launch a single subagent:
 
 > Read all available `sast/*-results.md` files and `sast/architecture.md` for context, then run the sast-report skill to generate `sast/final-report.md` with all findings ranked by severity and confidentiality impact.
+
+---
+
+## Step 4: Triage
+
+After `sast/final-report.md` is generated, triage every finding to eliminate false positives and correct severities.
+
+Skip this step if `sast/final-report-triaged.md` already exists.
+
+Launch a single subagent that runs the sast-triage skill:
+
+> Read `sast/final-report.md`, all `sast/*-results.json`, and `sast/architecture.md`. Run the sast-triage skill. For each finding, decide if it is a true positive, a false positive, or needs a severity adjustment (up or down), with evidence from the codebase for every change. Write the final triaged report to `sast/final-report-triaged.md` and the machine-readable canonical view to `sast/triaged.json`. Do not modify the original `*-results.json` or `final-report.md` — the triaged files are additive so the raw output stays auditable.
+
+`sast-skills export --input sast/ --triaged` will prefer `sast/triaged.json` over `sast/*-results.json` when both are present.

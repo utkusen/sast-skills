@@ -20,6 +20,7 @@ if (command === '--version') {
     '  update       Refresh an existing install with the bundled skill files',
     '  uninstall    Remove installed SAST skills',
     '  doctor       Verify an install against the bundled files',
+    '  export       Convert sast/ findings to JSON, SARIF, or HTML',
     '',
     'Flags:',
     '  --version    Print the installed version',

@@ -36,6 +36,7 @@ Claude Code with Opus model is recommended. But if the cost is a concern, use an
 | sast-businesslogic | Business logic flaws (price manipulation, workflow bypass, race conditions, etc.) |
 | sast-hardcodedsecrets | Hardcoded API keys, tokens, and credentials in client-facing code |
 | sast-report | Consolidated final report ranked by severity |
+| sast-triage | False-positive elimination and severity adjustment over the consolidated report |
 
 ## Installation
 
@@ -59,6 +60,7 @@ Other commands:
 | `npx sast-skills update` | Refresh an existing install with the currently bundled skill files |
 | `npx sast-skills uninstall` | Remove installed skills (refuses to clobber a modified CLAUDE.md without `--force`) |
 | `npx sast-skills doctor` | Verify an install and report `OK` / `MISSING` / `MODIFIED` for each file |
+| `npx sast-skills export --input sast/ --format sarif --output report.sarif` | Aggregate `sast/*-results.json` into SARIF, JSON, or HTML |
 | `npx sast-skills --version` | Print the installed version |
 
 > **Note:** If your project already contains a `CLAUDE.md` or `AGENTS.md` file, either pass `--force` to overwrite it or back it up first — the installer will refuse to clobber it by default.
@@ -82,5 +84,32 @@ All output is written to a `sast/` folder in your project root:
 | File | Description |
 |---|---|
 | `sast/architecture.md` | Technology stack, architecture, entry points, data flows |
-| `sast/*-results.md` | Per-vulnerability-class findings with proof and remediation |
+| `sast/*-results.md` | Per-vulnerability-class findings (human-readable) |
+| `sast/*-results.json` | Canonical machine-readable findings for `sast-skills export` |
 | `sast/final-report.md` | Consolidated report ranked by severity |
+| `sast/final-report-triaged.md` | Triaged report with false positives removed and severities adjusted |
+| `sast/triaged.json` | Canonical triaged findings (preferred by `sast-skills export --triaged`) |
+
+## CI integrations
+
+### GitHub Code Scanning
+
+Drop the bundled composite action into a workflow to upload SARIF to Code Scanning:
+
+```yaml
+- uses: mstfknn/sast-skills/.github/actions/scan@main
+  with:
+    input: sast/
+    output: sast-skills.sarif
+```
+
+### Pre-commit hook
+
+Copy [hooks/pre-commit](hooks/pre-commit) into `.git/hooks/pre-commit` to make `sast-skills doctor` gate every commit.
+
+### Docker
+
+```bash
+docker build -t sast-skills .
+docker run --rm -v "$PWD:/work" sast-skills export --input sast/ --format sarif --output report.sarif
+```

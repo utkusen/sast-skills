@@ -59,6 +59,26 @@ test('export --format json echoes the findings JSON to stdout', async () => {
   expect(parsed).toEqual(findingsFixture);
 });
 
+test('export --triaged prefers sast/triaged.json over raw *-results.json files', async () => {
+  const sastDir = join(workdir, 'sast');
+  const { mkdir } = await import('node:fs/promises');
+  await mkdir(sastDir, { recursive: true });
+
+  const rawFinding = { id: 'raw', skill: 'sast-sqli', severity: 'high', title: 'raw-title', description: 'd', location: { file: 'a.js', line: 1, column: 1 }, remediation: '' };
+  const triagedFinding = { id: 'raw', skill: 'sast-sqli', severity: 'low', title: 'triaged-title', description: 'downgraded: not reachable', location: { file: 'a.js', line: 1, column: 1 }, remediation: '' };
+
+  await writeFile(join(sastDir, 'sqli-results.json'), JSON.stringify({ findings: [rawFinding] }));
+  await writeFile(join(sastDir, 'triaged.json'), JSON.stringify({ run: { tool: 'sast-skills', version: '0.1.0' }, findings: [triagedFinding] }));
+
+  const { code, stdout } = await run(['export', '--format', 'json', '--triaged', '--input', sastDir]);
+  expect(code).toBe(0);
+
+  const parsed = JSON.parse(stdout);
+  expect(parsed.findings).toHaveLength(1);
+  expect(parsed.findings[0].title).toBe('triaged-title');
+  expect(parsed.findings[0].severity).toBe('low');
+});
+
 test('export --input <dir> aggregates every *-results.json in the directory', async () => {
   const sastDir = join(workdir, 'sast');
   const { mkdir } = await import('node:fs/promises');
@@ -104,6 +124,15 @@ test('export --format html produces an HTML report with a findings table', async
   expect(stdout).toMatch(/SQL injection in \/api\/user/);
   expect(stdout).toMatch(/high/);
   expect(stdout).toMatch(/src\/api\/user\.js.*42/);
+});
+
+test('HTML output tags severity cells with a class for CSS styling', async () => {
+  const input = join(workdir, 'findings.json');
+  await writeFile(input, JSON.stringify(findingsFixture));
+
+  const { stdout } = await run(['export', '--format', 'html', '--input', input]);
+  expect(stdout).toMatch(/class="severity-high"/);
+  expect(stdout).toMatch(/<style[^>]*>[\s\S]*\.severity-high\b/);
 });
 
 test('SARIF level maps severities: critical/high→error, medium→warning, low/info→note', async () => {

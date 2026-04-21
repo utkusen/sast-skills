@@ -1,0 +1,31 @@
+name: 'sast-skills scan'
+description: 'Aggregate sast/*-results.json into SARIF and upload to GitHub Code Scanning'
+
+inputs:
+  input:
+    description: 'Directory containing *-results.json files produced by the sast-skills scan'
+    required: false
+    default: 'sast/'
+  output:
+    description: 'Path to write the SARIF file'
+    required: false
+    default: 'sast-skills.sarif'
+  category:
+    description: 'Code Scanning analysis category'
+    required: false
+    default: 'sast-skills'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Export SARIF
+      shell: bash
+      env:
+        INPUT_DIR: ${{ inputs.input }}
+        OUTPUT_FILE: ${{ inputs.output }}
+      run: npx sast-skills@latest export --input "$INPUT_DIR" --format sarif --output "$OUTPUT_FILE"
+    - name: Upload SARIF to Code Scanning
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.output }}
+        category: ${{ inputs.category }}

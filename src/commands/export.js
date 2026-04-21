@@ -13,17 +13,27 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+const SEVERITY_STYLES = `
+.severity-critical { background: #7a0b1f; color: #fff; font-weight: bold; }
+.severity-high     { background: #e03434; color: #fff; font-weight: bold; }
+.severity-medium   { background: #f1b048; color: #000; }
+.severity-low      { background: #f4e79a; color: #000; }
+.severity-info     { background: #cfe8ff; color: #000; }
+`;
+
 function toHtml(data) {
   const rows = data.findings.map((f) => `<tr>
   <td>${escapeHtml(f.skill)}</td>
-  <td>${escapeHtml(f.severity)}</td>
+  <td class="severity-${escapeHtml(f.severity)}">${escapeHtml(f.severity)}</td>
   <td>${escapeHtml(f.title)}</td>
   <td>${escapeHtml(f.location.file)}:${f.location.line}</td>
   <td>${escapeHtml(f.description)}</td>
 </tr>`).join('\n');
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><title>SAST Report</title></head>
+<head><meta charset="utf-8"><title>SAST Report</title>
+<style>${SEVERITY_STYLES}</style>
+</head>
 <body>
 <h1>SAST Report — ${escapeHtml(data.run.tool)} ${escapeHtml(data.run.version)}</h1>
 <table border="1">
@@ -60,21 +70,28 @@ export async function exportCmd({ argv, stdout }) {
   let input;
   let output;
   let format = 'json';
+  let triaged = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--input') input = argv[++i];
     else if (argv[i] === '--output') output = argv[++i];
     else if (argv[i] === '--format') format = argv[++i];
+    else if (argv[i] === '--triaged') triaged = true;
   }
   const info = await stat(input);
   let data;
   if (info.isDirectory()) {
-    const files = (await readdir(input)).filter((n) => n.endsWith('-results.json'));
-    const findings = [];
-    for (const f of files) {
-      const parsed = JSON.parse(await readFile(join(input, f), 'utf8'));
-      if (Array.isArray(parsed.findings)) findings.push(...parsed.findings);
+    const triagedPath = join(input, 'triaged.json');
+    if (triaged && await stat(triagedPath).then(() => true, () => false)) {
+      data = JSON.parse(await readFile(triagedPath, 'utf8'));
+    } else {
+      const files = (await readdir(input)).filter((n) => n.endsWith('-results.json'));
+      const findings = [];
+      for (const f of files) {
+        const parsed = JSON.parse(await readFile(join(input, f), 'utf8'));
+        if (Array.isArray(parsed.findings)) findings.push(...parsed.findings);
+      }
+      data = { run: { tool: 'sast-skills', version: '0.1.0' }, findings };
     }
-    data = { run: { tool: 'sast-skills', version: '0.1.0' }, findings };
   } else {
     data = JSON.parse(await readFile(input, 'utf8'));
   }
